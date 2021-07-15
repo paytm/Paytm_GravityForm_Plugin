@@ -17,15 +17,15 @@ class PaytmConstants{
 	CONST CHANNEL_ID							= "WEB";
 	CONST APPEND_TIMESTAMP						= true;
 	CONST ORDER_PREFIX							= "";
-	CONST X_REQUEST_ID							= "PLUGIN_WOOCOMMERCE_";
-	CONST PLUGIN_DOC_URL						= "https://developer.paytm.com/docs/eCommerce-plugin/woocommerce/";
+	CONST X_REQUEST_ID							= "PLUGIN_GRAVITY_FORM_";
+	CONST PLUGIN_DOC_URL						= "https://developer.paytm.com/docs/";
 
 	CONST MAX_RETRY_COUNT						= 3;
 	CONST CONNECT_TIMEOUT						= 10;
 	CONST TIMEOUT								= 10;
 
-	CONST LAST_UPDATED							= "20191005";
-	CONST PLUGIN_VERSION						= "2.0";
+	CONST LAST_UPDATED							= "20211507";
+	CONST PLUGIN_VERSION						= "2.1";
 
 	CONST CUSTOM_CALLBACK_URL					= "";
 
