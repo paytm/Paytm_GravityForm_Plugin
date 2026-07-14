@@ -2,12 +2,12 @@
 /**
  * Plugin Name: Paytm Gravity Forms Payment
  * Description: Integrates Gravity Forms with Paytm Form, enabling end users to purchase goods and services through Gravity Forms.
- * Version: 2.1.0
+ * Version: 3.0.0
  * Author: Paytm
  * Requires at least: 3.5
  * Tags: Paytm, Paytm Payments, PayWithPaytm, Paytm Gravity Forms, Paytm Payment Gateway
- * Tested up to: 6.7.1
- * Requires PHP: 5.6
+ * Tested up to: 7.0.1
+ * Requires PHP: 7.4.0
  * Text Domain: Paytm Gravity Form
  */ 
 require(dirname(__FILE__) . '/lib/PaytmChecksum.php');
@@ -22,90 +22,102 @@ add_action('init', 'maybe_thankyou_page');
 
 function maybe_thankyou_page(){
 
-if (isset($_GET['paytmcallback']) && $_GET['paytmcallback']==true) {
+    if (isset($_GET['paytmcallback']) && $_GET['paytmcallback']==true) {
     
                 
          //if(!self::is_gravityforms_supported())
            // return;
         
-        if(! empty($_POST)){
+        if(! empty($_POST))
+        {
+            $callback_post = wp_unslash($_POST);
             $str = RGForms::get("gf_paytm_form_return");
             $str = base64_decode($str);
-                        
-                $settings = get_option("gf_paytm_form_settings");
-                $paytm_key = rgar($settings,"paytm_key");
-                
-                $paytmChecksum = isset($_POST["CHECKSUMHASH"]) ? $_POST["CHECKSUMHASH"] : ""; //Sent by Paytm pg
-
-                unset($_POST['CHECKSUMHASH']);
-                $isValidChecksum = PaytmChecksum::verifySignature($_POST, $paytm_key, $paytmChecksum);
-
-                                
-                if($isValidChecksum == true){
-
-
-                            $objGravity = new GFPaytmForm(); 
-
-                            $custom = $_POST['ORDERID'];
-                            list($vv,$entry_id) = explode("-", $custom);
-                            $entry = RGFormsModel::get_lead($entry_id); 
-
-
-                            print_r($entry);
-                            if(!$entry){
-                               $objGravity->log_error("Entry could not be found. Entry ID: {$entry_id}. Aborting.");
-                                return;
-                            }
-                            $objGravity->log_debug("Entry has been found." . print_r($entry, true));
-                            $config = $objGravity->get_config_by_entry($entry);
-                      if(!$config){
-                         $objGravity->log_error("Form no longer is configured with Paytm Form Addon. Form ID: {$entry["form_id"]}. Aborting.");
-                        return;
-                      }
-                            $settings = get_option("gf_paytm_form_settings");
-                            
-                          // GFPaytmForm::log_debug("Form {$entry["form_id"]} is properly configured.");
-                            if($_POST['RESPCODE'] == "01"){
-                                $payment_status = "SUCCESS";
-                            }else{
-                                $payment_status = "FAILED";
-                            }
-                            
-                            $cancel = apply_filters("gform_paytm_form_pre_ipn", false, $_POST, $entry, $config);
-                            
-                            if(!$cancel) {
-                               
-               $objGravity->log_debug("Setting payment status...");
-               $objGravity->set_payment_status($config, $entry, $payment_status, $_POST['ORDERID'], null, $_POST['TXNAMOUNT'] );
-              }
-              else{
-              $objGravity->log_debug("IPN processing cancelled by the gform_paytm_form_pre_ipn filter. Aborting.");
-              }
-              //  list($form_id, $lead_id) = explode("|", $query["ids"]);
-                            //  add_action('the_content', array('GFSagePayForm', 'paytmShowMessage'));
-                
-                if($_POST["STATUS"] == "TXN_SUCCESS"){
-                    $redirect_url = get_permalink( rgar($settings, 'paytm_return_page'));
-                } else {
-                    // $redirect_url = get_bloginfo("url") . '/?resp_msg=' . urlencode($_POST['RESPMSG']);
-                    $redirect_url = get_permalink( rgar($settings, 'paytm_return_page')) . '/?resp_msg=' . urlencode($_POST['RESPMSG']);
                     
-                }
-               
-                wp_redirect( $redirect_url );
-                exit;   
-                                
-            }else if(isset($_POST['RESPCODE'])){
-                $redirect_url = get_bloginfo("url") . '/?resp_msg=' . urlencode("Security error!");
-                // $redirect_url = get_permalink( rgar($settings, 'paytm_return_page')). '/?resp_msg=' . urlencode("Security error!");
-                wp_redirect( $redirect_url );
-              exit; 
+            $settings = get_option("gf_paytm_form_settings");
+            $paytm_key = rgar($settings,"paytm_key");
+            
+            $paytmChecksum = isset($_POST["CHECKSUMHASH"]) ? $_POST["CHECKSUMHASH"] : ""; //Sent by Paytm pg
+
+            unset($_POST['CHECKSUMHASH']);
+            $isValidChecksum = PaytmChecksum::verifySignature($_POST, $paytm_key, $paytmChecksum);
+
+                            
+            if($isValidChecksum == true)
+            {
+                        $objGravity = new GFPaytmForm(); 
+
+                        $custom = isset($_POST['ORDERID']) ? $_POST['ORDERID'] : '';
+                        list($vv,$entry_id) = explode("-", $custom);
+                        if (class_exists('GFAPI')) {
+                            $entry = GFAPI::get_entry($entry_id);
+                            if (is_wp_error($entry)) {
+                                $entry = false;
+                            }
+                        } else {
+                            $entry = RGFormsModel::get_lead($entry_id);
+                        }
+
+
+                            /* print_r($entry); */
+                        if(!$entry){
+                            GFPaytmForm::log_error("Entry could not be found. Entry ID: {$entry_id}. Aborting.");
+                            return;
+                        }
+                        GFPaytmForm::save_callback_response($entry['id'], $callback_post);
+                        $objGravity->log_debug("Entry has been found." . print_r($entry, true));
+                        $config = $objGravity->get_config_by_entry($entry);
+                    if(!$config){
+                        GFPaytmForm::log_error("Form no longer is configured with Paytm Form Addon. Form ID: {$entry["form_id"]}. Aborting.");
+                        return;
+                    }
+                        $settings = get_option("gf_paytm_form_settings");
+                        
+                        // GFPaytmForm::log_debug("Form {$entry["form_id"]} is properly configured.");
+                        $resp_code = isset($_POST['RESPCODE']) ? $_POST['RESPCODE'] : '';
+                        if($resp_code == "01"){
+                            $payment_status = "SUCCESS";
+                        }else{
+                            $payment_status = "FAILED";
+                        }
+                        /* echo "payment_status: " . $payment_status; */
+                        $cancel = apply_filters("gform_paytm_form_pre_ipn", false, $_POST, $entry, $config);
+                        
+                        if(!$cancel) {
+                            
+                        $objGravity->log_debug("Setting payment status...");
+                        $order_id = isset($_POST['ORDERID']) ? $_POST['ORDERID'] : '';
+                        $txn_amount = isset($_POST['TXNAMOUNT']) ? $_POST['TXNAMOUNT'] : 0;
+                        $objGravity->set_payment_status($config, $entry, $payment_status, $order_id, null, $txn_amount );
+                        }
+                        else{
+                        $objGravity->log_debug("IPN processing cancelled by the gform_paytm_form_pre_ipn filter. Aborting.");
+                        }
+
+                        $return_page_id = rgar($settings, 'paytm_return_page');
+                        $redirect_url = $return_page_id ? get_permalink($return_page_id) : home_url('/');
+                        $is_success = (isset($_POST['STATUS']) && $_POST['STATUS'] === 'TXN_SUCCESS');
+                        $redirect_url = paytm_build_return_redirect_url($redirect_url, $callback_post, $is_success);
+                        wp_redirect($redirect_url);
+                        exit;   
+                            
             }
-        }else{
-                             
-        
-
-
+            else 
+            {
+                /*  if(isset($_POST['RESPCODE'])){
+                if (!empty($callback_post['ORDERID'])) {
+                    $order_parts = explode('-', $callback_post['ORDERID']);
+                    $failed_entry_id = absint(end($order_parts));
+                    if ($failed_entry_id) {
+                        GFPaytmForm::save_callback_response($failed_entry_id, $callback_post);
+                    }
+                } */
+                $return_page_id = rgar($settings, 'paytm_return_page');
+                $redirect_url = $return_page_id ? get_permalink($return_page_id) : home_url('/');
+                $redirect_url = paytm_build_return_redirect_url($redirect_url, $callback_post, false, __('Security error! Invalid payment response.', 'paytm-gravity-forms'));
+                wp_redirect($redirect_url);
+                exit; 
+            }
         }
     }
     
@@ -118,12 +130,191 @@ if (isset($_GET['paytmcallback']) && $_GET['paytmcallback']==true) {
 
 register_activation_hook( __FILE__, array("GFPaytmForm", "add_permissions"));
 
-if(isset($_GET['resp_msg']) && $_GET['resp_msg']!=''){
-    add_action('the_content', 'paytmShowMessage');
+add_action('wp_footer', 'paytm_render_return_modal', 20);
+
+function paytm_build_return_redirect_url($base_url, $post_data = array(), $is_success = false, $fallback_message = '') {
+    if (empty($base_url)) {
+        $base_url = home_url('/');
+    }
+
+    $args = array(
+        'paytm_return' => '1',
+        'paytm_status' => $is_success ? 'success' : 'failed',
+    );
+
+    $field_map = array(
+        'paytm_orderid'   => 'ORDERID',
+        'paytm_txnid'     => 'TXNID',
+        'paytm_txnamount' => 'TXNAMOUNT',
+        'paytm_txndate'   => 'TXNDATE',
+        'paytm_respmsg'   => 'RESPMSG',
+    );
+
+    foreach ($field_map as $query_key => $post_key) {
+        if (!empty($post_data[$post_key])) {
+            $args[$query_key] = base64_encode(sanitize_text_field($post_data[$post_key]));
+        }
+    }
+
+    if (empty($args['paytm_respmsg']) && !empty($fallback_message)) {
+        $args['paytm_respmsg'] = $fallback_message;
+    } elseif (empty($args['paytm_respmsg'])) {
+        $args['paytm_respmsg'] = $is_success
+            ? __('Payment completed successfully.', 'paytm-gravity-forms')
+            : __('Payment failed. Please try again.', 'paytm-gravity-forms');
+    }
+
+    return add_query_arg($args, $base_url);
 }
 
- function paytmShowMessage($content){
-        return '<div class="box '.htmlentities($_GET['type']).'-box">'.htmlentities(urldecode($_GET['resp_msg'])).'</div>'.$content;
+function paytm_render_return_modal() {
+    if (!isset($_GET['paytm_return']) || $_GET['paytm_return'] !== '1') {
+        return;
+    }
+
+    $status = (isset($_GET['paytm_status']) && $_GET['paytm_status'] === 'success') ? 'success' : 'failed';
+    $is_success = ($status === 'success');
+    $title = $is_success
+        ? __('Payment Successful', 'paytm-gravity-forms')
+        : __('Payment Failed', 'paytm-gravity-forms');
+
+    $fields = array(
+        'ORDERID'   => isset($_GET['paytm_orderid']) ? sanitize_text_field(wp_unslash($_GET['paytm_orderid'])) : '',
+        'TXNID'     => isset($_GET['paytm_txnid']) ? sanitize_text_field(wp_unslash($_GET['paytm_txnid'])) : '',
+        'TXNAMOUNT' => isset($_GET['paytm_txnamount']) ? sanitize_text_field(wp_unslash($_GET['paytm_txnamount'])) : '',
+        'TXNDATE'   => isset($_GET['paytm_txndate']) ? sanitize_text_field(wp_unslash($_GET['paytm_txndate'])) : '',
+        'RESPMSG'   => isset($_GET['paytm_respmsg']) ? sanitize_text_field(wp_unslash($_GET['paytm_respmsg'])) : '',
+    );
+
+    $has_details = false;
+    foreach ($fields as $value) {
+        if ($value !== '') {
+            $has_details = true;
+            break;
+        }
+    }
+    ?>
+    <div id="paytm-return-modal-overlay" class="paytm-return-modal-overlay" role="presentation"></div>
+    <div id="paytm-return-modal" class="paytm-return-modal paytm-return-modal--<?php echo esc_attr($status); ?>" role="dialog" aria-modal="true" aria-labelledby="paytm-return-modal-title">
+        <div class="paytm-return-modal__content">
+            <h2 id="paytm-return-modal-title" class="paytm-return-modal__title"><?php echo esc_html($title); ?></h2>
+            <?php if ($has_details) : ?>
+                <table class="paytm-return-modal__table">
+                    <tbody>
+                        <?php foreach ($fields as $label => $value) : ?>
+                            <?php if ($value !== '') : ?>
+                                <tr>
+                                    <th scope="row"><?php echo esc_html($label); ?></th>
+                                    <td><?php echo esc_html(base64_decode($value)); ?></td>
+                                </tr>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+            <button type="button" id="paytm-return-modal-ok" class="paytm-return-modal__button"><?php esc_html_e('OK', 'paytm-gravity-forms'); ?></button>
+        </div>
+    </div>
+    <style type="text/css">
+        .paytm-return-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 100000;
+        }
+        .paytm-return-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100001;
+            width: 92%;
+            max-width: 520px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+        }
+        .paytm-return-modal__content {
+            padding: 24px;
+        }
+        .paytm-return-modal__title {
+            margin: 0 0 16px;
+            font-size: 22px;
+            line-height: 1.3;
+        }
+        .paytm-return-modal--success .paytm-return-modal__title {
+            color: #1b7f3b;
+        }
+        .paytm-return-modal--failed .paytm-return-modal__title {
+            color: #b42318;
+        }
+        .paytm-return-modal__table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        .paytm-return-modal__table th,
+        .paytm-return-modal__table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .paytm-return-modal__table th {
+            width: 35%;
+            color: #374151;
+            font-weight: 600;
+        }
+        .paytm-return-modal__table td {
+            color: #111827;
+            word-break: break-word;
+        }
+        .paytm-return-modal__button {
+            display: inline-block;
+            min-width: 120px;
+            padding: 10px 18px;
+            border: 0;
+            border-radius: 4px;
+            background: #2271b1;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .paytm-return-modal__button:hover,
+        .paytm-return-modal__button:focus {
+            background: #135e96;
+        }
+    </style>
+    <script type="text/javascript">
+    (function() {
+        var okButton = document.getElementById('paytm-return-modal-ok');
+        if (!okButton) {
+            return;
+        }
+        okButton.addEventListener('click', function() {
+            var url = new URL(window.location.href);
+            [
+                'paytm_return',
+                'paytm_status',
+                'paytm_orderid',
+                'paytm_txnid',
+                'paytm_txnamount',
+                'paytm_txndate',
+                'paytm_respmsg',
+                'resp_msg',
+                'type'
+            ].forEach(function(param) {
+                url.searchParams.delete(param);
+            });
+            window.location.href = url.toString();
+        });
+    })();
+    </script>
+    <?php
 }
 if(!defined("GF_PAYTM_FORM_PLUGIN_PATH"))
     define("GF_PAYTM_FORM_PLUGIN_PATH", dirname( plugin_basename( __FILE__ ) ) );
@@ -142,7 +333,7 @@ class GFPaytmForm {
     private static $path = GF_PAYTM_FORM_PLUGIN;
     private static $url = "https://www.paytmpayments.com";
     private static $slug = "paytm-gravity-forms";
-    private static $version = "2.1.0";
+    private static $version = "3.0.0";
     private static $min_gravityforms_version = "1.6.4";
     private static $supported_fields = array("checkbox", "radio", "select", "text", "website", "textarea", "email", "hidden", "number", "phone", "multiselect", "post_title", "post_tags", "post_custom_field", "post_content", "post_excerpt");
 
@@ -161,6 +352,8 @@ class GFPaytmForm {
         if(!self::is_gravityforms_supported())
            return;
 
+        self::ensure_permissions();
+
         if(is_admin()){
             //loading translations
             load_plugin_textdomain('paytm-gravity-forms', FALSE,'/languages' );
@@ -175,6 +368,7 @@ class GFPaytmForm {
             //add actions to allow the payment status to be modified
             add_action('gform_payment_status', array('GFPaytmForm','admin_edit_payment_status'), 3, 3);
             add_action('gform_entry_info', array('GFPaytmForm','admin_edit_payment_status_details'), 4, 2);
+            add_action('gform_entry_detail_sidebar_middle', array('GFPaytmForm', 'admin_display_paytm_callback_details'), 10, 2);
             add_action('gform_after_update_entry', array('GFPaytmForm','admin_update_payment'), 4, 2);
 
 
@@ -214,6 +408,7 @@ class GFPaytmForm {
 
             //handling post submission.
             add_filter("gform_confirmation", array("GFPaytmForm", "send_to_paytm_form"), 1000, 4);
+            add_action("gform_enqueue_scripts", array("GFPaytmForm", "enqueue_confirmation_script"), 10, 2);
 
             //setting some entry metas
             //add_action("gform_after_submission", array("GFPaytmForm", "set_entry_meta"), 5, 2);
@@ -289,7 +484,7 @@ class GFPaytmForm {
         // Adding submenu if user has access
         $permission = self::has_access("paytm-gravity-forms");
         if(!empty($permission))
-            $menus[] = array("name" => "gf_paytm_form", "label" => esc_attr_e("Paytm Form", "paytm-gravity-forms"), "callback" =>  array("GFPaytmForm", "paytm_form_page"), "permission" => $permission);
+            $menus[] = array("name" => "gf_paytm_form", "label" => __("Paytm Form", "paytm-gravity-forms"), "callback" =>  array("GFPaytmForm", "paytm_form_page"), "permission" => $permission);
 
         return $menus;
     }
@@ -305,20 +500,84 @@ class GFPaytmForm {
     //Adds feed tooltips to the list of tooltips
     public static function tooltips($tooltips){
         $paytm_form_tooltips = array(
-            "paytm_form_installation_id" => "<h6>" . esc_attr_e("Paytm Form Installation ID", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Enter the Paytm Form Installation ID where payment should be received.", "paytm-gravity-forms"),
-            "paytm_form_mode" => "<h6>" . esc_attr_e("Mode", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Select Production to receive live payments. Select Test for testing purposes when using the Paytm Form development sandbox.", "paytm-gravity-forms"),
-            "paytm_form_transaction_type" => "<h6>" . esc_attr_e("Transaction Type", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Select which Paytm Form transaction type should be used. Products and Services, Donations.", "paytm-gravity-forms"),
-            "paytm_form_gravity_form" => "<h6>" . esc_attr_e("Gravity Form", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Select which Gravity Forms you would like to integrate with Paytm Form.", "paytm-gravity-forms"),
-            "paytm_form_customer" => "<h6>" . esc_attr_e("Customer", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Map your Form Fields to the available Paytm Form customer information fields.", "paytm-gravity-forms"),
-            "paytm_form_cancel_url" => "<h6>" . esc_attr_e("Cancel URL", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Enter the URL the user should be sent to should they cancel before completing their Paytm Form payment.", "paytm-gravity-forms"),
-            "paytm_form_options" => "<h6>" . esc_attr_e("Options", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Turn on or off the available Paytm Form checkout options.", "paytm-gravity-forms"),
-            "paytm_form_conditional" => "<h6>" . esc_attr_e("Paytm Form Condition", "paytm-gravity-forms") . "</h6>" . esc_attr_e("When the Paytm Form condition is enabled, form submissions will only be sent to Paytm Form when the condition is met. When disabled all form submissions will be sent to Paytm Form.", "paytm-gravity-forms"),
-            "paytm_form_edit_payment_amount" => "<h6>" . esc_attr_e("Amount", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Enter the amount the user paid for this transaction.", "paytm-gravity-forms"),
-            "paytm_form_edit_payment_date" => "<h6>" . esc_attr_e("Date", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Enter the date of this transaction.", "paytm-gravity-forms"),
-            "paytm_form_edit_payment_transaction_id" => "<h6>" . esc_attr_e("Transaction ID", "paytm-gravity-forms") . "</h6>" . esc_attr_e("The transacation id is returned from Paytm Form and uniquely identifies this payment.", "paytm-gravity-forms"),
-            "paytm_form_edit_payment_status" => "<h6>" . esc_attr_e("Status", "paytm-gravity-forms") . "</h6>" . esc_attr_e("Set the payment status. This status can only be altered if not currently set to Approved.", "paytm-gravity-forms")
+            'paytm_form_installation_id' => self::format_tooltip(
+                __('Paytm Form Installation ID', 'paytm-gravity-forms'),
+                __('Enter the Paytm Form Installation ID where payment should be received.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_mode' => self::format_tooltip(
+                __('Mode', 'paytm-gravity-forms'),
+                __('Select Production to receive live payments. Select Test for testing purposes when using the Paytm Form development sandbox.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_transaction_type' => self::format_tooltip(
+                __('Transaction Type', 'paytm-gravity-forms'),
+                __('Choose how this feed should process payments. Donations are mapped to Paytm checkout for one-time contribution flows.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_gravity_form' => self::format_tooltip(
+                __('Gravity Form', 'paytm-gravity-forms'),
+                __('Select the Gravity Form that should send submissions to Paytm for payment collection.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_customer' => self::format_tooltip(
+                __('Customer', 'paytm-gravity-forms'),
+                __('Map Gravity Form fields to Paytm customer fields such as name, email, phone, and amount.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_cancel_url' => self::format_tooltip(
+                __('Cancel URL', 'paytm-gravity-forms'),
+                __('Optional landing page URL if the user cancels before completing Paytm payment.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_options' => self::format_tooltip(
+                __('Options', 'paytm-gravity-forms'),
+                __('Turn on or off the available Paytm Form checkout options.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_delay_admin_notification' => self::format_tooltip(
+                __('Admin Notification', 'paytm-gravity-forms'),
+                __('When enabled, the admin notification is sent only after Paytm confirms a successful payment.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_delay_user_notification' => self::format_tooltip(
+                __('User Notification', 'paytm-gravity-forms'),
+                __('When enabled, the user/autoresponder notification is sent only after Paytm confirms a successful payment.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_delay_post' => self::format_tooltip(
+                __('Delay Post Creation', 'paytm-gravity-forms'),
+                __('Create the WordPress post from this submission only after payment is successfully received.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_update_post' => self::format_tooltip(
+                __('Update Post on Cancel', 'paytm-gravity-forms'),
+                __('Choose what should happen to the related post when a subscription is cancelled.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_notifications' => self::format_tooltip(
+                __('Notifications', 'paytm-gravity-forms'),
+                __('Delay selected Gravity Forms notifications until Paytm reports a successful payment.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_conditional' => self::format_tooltip(
+                __('Paytm Form Condition', 'paytm-gravity-forms'),
+                __('When enabled, submissions are sent to Paytm only when the condition is met. When disabled, every submission uses Paytm.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_edit_payment_amount' => self::format_tooltip(
+                __('Amount', 'paytm-gravity-forms'),
+                __('Enter the amount the user paid for this transaction.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_edit_payment_date' => self::format_tooltip(
+                __('Date', 'paytm-gravity-forms'),
+                __('Enter the date of this transaction.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_edit_payment_transaction_id' => self::format_tooltip(
+                __('Transaction ID', 'paytm-gravity-forms'),
+                __('The transaction ID returned by Paytm that uniquely identifies this payment.', 'paytm-gravity-forms')
+            ),
+            'paytm_form_edit_payment_status' => self::format_tooltip(
+                __('Status', 'paytm-gravity-forms'),
+                __('Set the payment status. This can only be changed if it is not already Approved.', 'paytm-gravity-forms')
+            ),
         );
+
         return array_merge($tooltips, $paytm_form_tooltips);
+    }
+
+    private static function format_tooltip($title, $body) {
+        return '<div class="paytm-tooltip">'
+            . '<div class="paytm-tooltip__title">' . esc_html($title) . '</div>'
+            . '<div class="paytm-tooltip__body">' . esc_html($body) . '</div>'
+            . '</div>';
     }
 
     public static function delay_post($is_disabled, $form, $lead){
@@ -330,7 +589,7 @@ class GFPaytmForm {
             return $is_disabled;
 
         $config = $config[0];
-        if(!self::has_paytm_form_condition($form, $config))
+        if(!self::has_paytm_form_condition($form, $config, $lead))
             return $is_disabled;
 
         return $config["meta"]["delay_post"] == true;
@@ -338,7 +597,7 @@ class GFPaytmForm {
 
     //Kept for backwards compatibility
     public static function delay_admin_notification($is_disabled, $form, $lead){
-        $config = self::get_active_config($form);
+        $config = self::get_active_config($form, $lead);
 
         if(!$config)
             return $is_disabled;
@@ -348,7 +607,7 @@ class GFPaytmForm {
 
     //Kept for backwards compatibility
     public static function delay_autoresponder($is_disabled, $form, $lead){
-        $config = self::get_active_config($form);
+        $config = self::get_active_config($form, $lead);
 
         if(!$config)
             return $is_disabled;
@@ -357,7 +616,7 @@ class GFPaytmForm {
     }
 
     public static function delay_notification($is_disabled, $notification, $form, $lead){
-        $config = self::get_active_config($form);
+        $config = self::get_active_config($form, $lead);
 
         if(!$config)
             return $is_disabled;
@@ -402,193 +661,226 @@ class GFPaytmForm {
 
     }
 
-    public static function paytm_form_page(){
-        $view = rgget("view");
-        if($view == "edit")
-            self::edit_page(rgget("id"));
-        else if($view == "stats")
-            self::stats_page(rgget("id"));
-        else
-            self::list_page();
+    public static function paytm_form_page() {
+        if (!self::has_access('paytm-gravity-forms')) {
+            wp_die(esc_html__('You do not have permission to access this page.', 'paytm-gravity-forms'));
+        }
+
+        // edit_page / stats_page read the feed id from the request themselves.
+        switch (sanitize_key((string) rgget('view'))) {
+            case 'edit':
+                self::edit_page();
+                break;
+            default:
+                self::list_page();
+                break;
+        }
     }
 
     //Displays the paytm_form feeds list page
-    private static function list_page(){
-        if(!self::is_gravityforms_supported()){
-            die(esc_attr_e(sprintf("Paytm Form Add-On requires Gravity Forms %s. Upgrade automatically on the %sPlugin page%s.", self::$min_gravityforms_version, "<a href='plugins.php'>", "</a>"), "paytm-gravity-forms"));
+    private static function list_page() {
+        if (!self::is_gravityforms_supported()) {
+            wp_die(
+                sprintf(
+                    /* translators: 1: minimum Gravity Forms version, 2: opening anchor, 3: closing anchor */
+                    esc_html__('Paytm Form Add-On requires Gravity Forms %1$s. Upgrade automatically on the %2$sPlugin page%3$s.', 'paytm-gravity-forms'),
+                    esc_html(self::$min_gravityforms_version),
+                    '<a href="' . esc_url(admin_url('plugins.php')) . '">',
+                    '</a>'
+                )
+            );
         }
 
-        if(rgpost('action') == "delete"){
-            check_admin_referer("list_action", "gf_paytm_form_list");
-
-            $id = absint($_POST["action_argument"]);
-            GFPaytmFormData::delete_feed($id);
-            ?>
-<div class="updated fade" style="padding:6px"><?php esc_attr_e("Feed deleted.", "paytm-gravity-forms") ?></div>
-            <?php
-        }
-        else if (!empty($_POST["bulk_action"])){
-            check_admin_referer("list_action", "gf_paytm_form_list");
-            $selected_feeds = $_POST["feed"];
-            if(is_array($selected_feeds)){
-                foreach($selected_feeds as $feed_id)
-                    GFPaytmFormData::delete_feed($feed_id);
+        $notice = '';
+        if (rgpost('action') === 'delete') {
+            check_admin_referer('list_action', 'gf_paytm_form_list');
+            GFPaytmFormData::delete_feed(absint(rgpost('action_argument')));
+            $notice = __('Feed deleted.', 'paytm-gravity-forms');
+        } elseif (rgpost('bulk_action') === 'delete') {
+            check_admin_referer('list_action', 'gf_paytm_form_list');
+            $selected_feeds = rgpost('feed');
+            if (is_array($selected_feeds)) {
+                foreach ($selected_feeds as $feed_id) {
+                    GFPaytmFormData::delete_feed(absint($feed_id));
+                }
             }
-            ?>
-<div class="updated fade" style="padding:6px"><?php esc_attr_e("Feeds deleted.", "paytm-gravity-forms") ?></div>
-            <?php
+            $notice = __('Feeds deleted.', 'paytm-gravity-forms');
         }
 
+        $feeds       = GFPaytmFormData::get_feeds();
+        $settings    = get_option('gf_paytm_form_settings');
+        $paytm_mid   = rgar($settings, 'paytm_mid');
+        $add_new_url = admin_url('admin.php?page=gf_paytm_form&view=edit&id=0');
+        $settings_url = admin_url('admin.php?page=gf_settings&addon=Paytm%20Form');
+
+        $delete_feed_confirm = esc_js(__("Delete this feed? 'Cancel' to stop, 'OK' to delete.", 'paytm-gravity-forms'));
+        $bulk_delete_confirm = esc_js(__("Delete selected feeds? 'Cancel' to stop, 'OK' to delete.", 'paytm-gravity-forms'));
+        $label_active        = esc_attr__('Active', 'paytm-gravity-forms');
+        $label_inactive      = esc_attr__('Inactive', 'paytm-gravity-forms');
+        $label_edit          = esc_attr__('Edit', 'paytm-gravity-forms');
+        $label_stats         = esc_attr__('View Stats', 'paytm-gravity-forms');
+        $label_entries       = esc_attr__('View Entries', 'paytm-gravity-forms');
+        $label_delete        = esc_attr__('Delete', 'paytm-gravity-forms');
         ?>
 <div class="wrap">
-    <img alt="<?php esc_attr_e("Paytm Form Transactions", "paytm-gravity-forms") ?>" src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL)?>/images/paytm_form_wordpress_icon_32.jpg" style="float:left; margin:15px 7px 0 0;"/>
-    <h2><?php
-            esc_attr_e("Paytm Form List", "paytm-gravity-forms");
-                    ?>
-    </h2>
+    <?php if ($notice) : ?>
+        <div class="updated fade" style="padding:6px"><?php echo esc_html($notice); ?></div>
+    <?php endif; ?>
+
+    <img alt="<?php echo esc_attr__('Paytm Form Transactions', 'paytm-gravity-forms'); ?>" src="<?php echo esc_url(GF_PAYTM_FORM_BASE_URL . '/images/paytm_form_wordpress_icon_32.jpg'); ?>" style="float:left; margin:15px 7px 0 0;"/>
+    <h2 style="float:left; width: 100%;"><?php esc_html_e('Paytm Form List', 'paytm-gravity-forms'); ?></h2>
 
     <form id="feed_form" method="post">
-                <?php wp_nonce_field('list_action', 'gf_paytm_form_list') ?>
-        <input type="hidden" id="action" name="action"/>
-        <input type="hidden" id="action_argument" name="action_argument"/>
+        <?php wp_nonce_field('list_action', 'gf_paytm_form_list'); ?>
+        <input type="hidden" id="action" name="action" value=""/>
+        <input type="hidden" id="action_argument" name="action_argument" value=""/>
 
         <div class="tablenav">
             <div class="alignleft actions" style="padding:8px 0 7px 0;">
-                <label class="hidden" for="bulk_action"><?php esc_attr_e("Bulk action", "paytm-gravity-forms") ?></label>
+                <label class="screen-reader-text" for="bulk_action"><?php esc_html_e('Bulk action', 'paytm-gravity-forms'); ?></label>
                 <select name="bulk_action" id="bulk_action">
-                    <option value=''> <?php esc_attr_e("Bulk action", "paytm-gravity-forms") ?> </option>
-                    <option value='delete'><?php esc_attr_e("Delete", "paytm-gravity-forms") ?></option>
+                    <option value=""><?php esc_html_e('Bulk action', 'paytm-gravity-forms'); ?></option>
+                    <option value="delete"><?php esc_html_e('Delete', 'paytm-gravity-forms'); ?></option>
                 </select>
-                        <?php
-                        echo '<input type="submit" class="button" value="' . esc_attr_e("Apply", "paytm-gravity-forms") . '" onclick="if( jQuery(\'#bulk_action\').val() == \'delete\' && !confirm(\'' . esc_attr_e("Delete selected feeds? ", "paytm-gravity-forms") . esc_attr_e("\'Cancel\' to stop, \'OK\' to delete.", "paytm-gravity-forms") .'\')) { return false; } return true;"/>';
-                        ?>
-                <a style="margin-top: 3px;" class="button add-new-h2" href="admin.php?page=gf_paytm_form&view=edit&id=0"><?php esc_attr_e("Add New", "paytm-gravity-forms") ?></a>
+                <input type="submit" class="button" value="<?php echo esc_attr__('Apply', 'paytm-gravity-forms'); ?>" onclick="if (jQuery('#bulk_action').val() === 'delete' && !confirm('<?php echo $bulk_delete_confirm; ?>')) { return false; } return true;"/>
+                <a style="margin-top: 3px;" class="button add-new-h2" href="<?php echo esc_url($add_new_url); ?>"><?php esc_html_e('Add New', 'paytm-gravity-forms'); ?></a>
             </div>
         </div>
+
         <table class="widefat fixed" cellspacing="0">
             <thead>
                 <tr>
-                    <th scope="col" id="cb" class="manage-column column-cb check-column" style=""><input type="checkbox" /></th>
-                    <th scope="col" id="active" class="manage-column check-column"></th>
-                    <th scope="col" class="manage-column"><?php esc_attr_e("Form", "paytm-gravity-forms") ?></th>
-                    <th scope="col" class="manage-column"><?php esc_attr_e("Transaction Type", "paytm-gravity-forms") ?></th>
+                    <th scope="col" class="manage-column column-cb check-column"><input type="checkbox" /></th>
+                    <th scope="col" class="manage-column check-column"></th>
+                    <th scope="col" class="manage-column"><?php esc_html_e('Form', 'paytm-gravity-forms'); ?></th>
+                    <th scope="col" class="manage-column"><?php esc_html_e('Transaction Type', 'paytm-gravity-forms'); ?></th>
                 </tr>
             </thead>
-
             <tfoot>
                 <tr>
-                    <th scope="col" id="cb" class="manage-column column-cb check-column" style=""><input type="checkbox" /></th>
-                    <th scope="col" id="active" class="manage-column check-column"></th>
-                    <th scope="col" class="manage-column"><?php esc_attr_e("Form", "paytm-gravity-forms") ?></th>
-                    <th scope="col" class="manage-column"><?php esc_attr_e("Transaction Type", "paytm-gravity-forms") ?></th>
+                    <th scope="col" class="manage-column column-cb check-column"><input type="checkbox" /></th>
+                    <th scope="col" class="manage-column check-column"></th>
+                    <th scope="col" class="manage-column"><?php esc_html_e('Form', 'paytm-gravity-forms'); ?></th>
+                    <th scope="col" class="manage-column"><?php esc_html_e('Transaction Type', 'paytm-gravity-forms'); ?></th>
                 </tr>
             </tfoot>
-
             <tbody class="list:user user-list">
-                        <?php
-
-
-                        $settings = GFPaytmFormData::get_feeds();
-                        $paytm_mid = get_option("gf_paytm_form_settings");
-                        $inst_id = rgar($paytm_mid,"paytm_mid");
-                        if(empty($inst_id)){
-                            ?>
-                <tr>
-                    <td colspan="3" style="padding:20px;">
-                                    <?php echo sprintf(esc_attr_e("To get started, please configure your %sPaytm Form Settings%s.", "paytm-gravity-forms"), '<a href="admin.php?page=gf_settings&addon=Paytm Form">', "</a>"); ?>
-                    </td>
-                </tr>
+                <?php if (empty($paytm_mid)) : ?>
+                    <tr>
+                        <td colspan="4" style="padding:20px;">
                             <?php
-                        }
-                        else if(is_array($settings) && sizeof($settings) > 0){
-                            foreach($settings as $setting){
-                                ?>
-                <tr class='author-self status-inherit' valign="top">
-                    <th scope="row" class="check-column"><input type="checkbox" name="feed[]" value="<?php echo $setting["id"] ?>"/></th>
-                    <td><img src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/images/active<?php echo intval($setting["is_active"]) ?>.png" alt="<?php echo $setting["is_active"] ? esc_attr_e("Active", "paytm-gravity-forms") : esc_attr_e("Inactive", "paytm-gravity-forms");?>" title="<?php echo $setting["is_active"] ? esc_attr_e("Active", "paytm-gravity-forms") : esc_attr_e("Inactive", "paytm-gravity-forms");?>" onclick="ToggleActive(this, <?php echo $setting['id'] ?>); " /></td>
-                    <td class="column-title">
-                        <a href="admin.php?page=gf_paytm_form&view=edit&id=<?php echo $setting["id"] ?>" title="<?php esc_attr_e("Edit", "paytm-gravity-forms") ?>"><?php echo $setting["form_title"] ?></a>
-                        <div class="row-actions">
-                            <span class="edit">
-                                <a title="<?php esc_attr_e("Edit", "paytm-gravity-forms")?>" href="admin.php?page=gf_paytm_form&view=edit&id=<?php echo $setting["id"] ?>" ><?php esc_attr_e("Edit", "paytm-gravity-forms") ?></a>
-                                |
-                            </span>
-                            <span class="view">
-                                <a title="<?php esc_attr_e("View Stats", "paytm-gravity-forms")?>" href="admin.php?page=gf_paytm_form&view=stats&id=<?php echo $setting["id"] ?>"><?php esc_attr_e("Stats", "paytm-gravity-forms") ?></a>
-                                |
-                            </span>
-                            <span class="view">
-                                <a title="<?php esc_attr_e("View Entries", "paytm-gravity-forms")?>" href="admin.php?page=gf_entries&view=entries&id=<?php echo $setting["form_id"] ?>"><?php esc_attr_e("Entries", "paytm-gravity-forms") ?></a>
-                                |
-                            </span>
-                            <span class="trash">
-                                <a title="<?php esc_attr_e("Delete", "paytm-gravity-forms") ?>" href="javascript: if(confirm('<?php esc_attr_e("Delete this feed? ", "paytm-gravity-forms") ?> <?php esc_attr_e("\'Cancel\' to stop, \'OK\' to delete.", "paytm-gravity-forms") ?>')){ DeleteSetting(<?php echo $setting["id"] ?>);}"><?php esc_attr_e("Delete", "paytm-gravity-forms")?></a>
-                            </span>
-                        </div>
-                    </td>
-                    <td class="column-date">
-                                        <?php
-                                            switch($setting["meta"]["type"]){
-                                                case "product" :
-                                                    esc_attr_e("Product and Services", "paytm-gravity-forms");
-                                                break;
-
-                                                case "donation" :
-                                                    esc_attr_e("Donation", "paytm-gravity-forms");
-                                                break;
-
-                                            }
-                                        ?>
-                    </td>
-                </tr>
-                                <?php
-                            }
-                        }
-                        else{
+                            echo wp_kses(
+                                sprintf(
+                                    /* translators: 1: opening anchor, 2: closing anchor */
+                                    __('To get started, please configure your %1$sPaytm Form Settings%2$s.', 'paytm-gravity-forms'),
+                                    '<a href="' . esc_url($settings_url) . '">',
+                                    '</a>'
+                                ),
+                                array('a' => array('href' => true))
+                            );
                             ?>
-                <tr>
-                    <td colspan="4" style="padding:20px;">
-                                    <?php echo sprintf(esc_attr_e("You don't have any Paytm Form feeds configured. Let's go %screate one%s!", "paytm-gravity-forms"), '<a href="admin.php?page=gf_paytm_form&view=edit&id=0">', "</a>"); ?>
-                    </td>
-                </tr>
-                            <?php
+                        </td>
+                    </tr>
+                <?php elseif (!empty($feeds) && is_array($feeds)) : ?>
+                    <?php foreach ($feeds as $setting) :
+                        $feed_id   = absint($setting['id']);
+                        $form_id   = absint($setting['form_id']);
+                        $is_active = !empty($setting['is_active']);
+                        $status    = $is_active ? $label_active : $label_inactive;
+                        $edit_url  = admin_url('admin.php?page=gf_paytm_form&view=edit&id=' . $feed_id);
+                        $stats_url = admin_url('admin.php?page=gf_paytm_form&view=stats&id=' . $feed_id);
+                        $entries_url = admin_url('admin.php?page=gf_entries&view=entries&id=' . $form_id);
+                        $type_label = '';
+                        switch (rgars($setting, 'meta/type')) {
+                            case 'product':
+                                $type_label = __('Product and Services', 'paytm-gravity-forms');
+                                break;
+                            case 'donation':
+                                $type_label = __('Donation', 'paytm-gravity-forms');
+                                break;
                         }
                         ?>
+                        <tr class="author-self status-inherit" valign="top">
+                            <th scope="row" class="check-column">
+                                <input type="checkbox" name="feed[]" value="<?php echo esc_attr($feed_id); ?>"/>
+                            </th>
+                            <td>
+                                <img
+                                    src="<?php echo esc_url(GF_PAYTM_FORM_BASE_URL . '/images/active' . ($is_active ? '1' : '0') . '.png'); ?>"
+                                    alt="<?php echo esc_attr($status); ?>"
+                                    title="<?php echo esc_attr($status); ?>"
+                                    onclick="ToggleActive(this, <?php echo (int) $feed_id; ?>);"
+                                />
+                            </td>
+                            <td class="column-title">
+                                <a href="<?php echo esc_url($edit_url); ?>" title="<?php echo $label_edit; ?>"><?php echo esc_html($setting['form_title']); ?></a>
+                                <div class="row-actions">
+                                    <span class="edit">
+                                        <a title="<?php echo $label_edit; ?>" href="<?php echo esc_url($edit_url); ?>"><?php esc_html_e('Edit', 'paytm-gravity-forms'); ?></a> |
+                                    </span>
+                                    <span class="view">
+                                        <a title="<?php echo $label_entries; ?>" href="<?php echo esc_url($entries_url); ?>"><?php esc_html_e('Entries', 'paytm-gravity-forms'); ?></a> |
+                                    </span>
+                                    <span class="trash">
+                                        <a title="<?php echo $label_delete; ?>" href="#" onclick="if (confirm('<?php echo $delete_feed_confirm; ?>')) { DeleteSetting(<?php echo (int) $feed_id; ?>); } return false;"><?php esc_html_e('Delete', 'paytm-gravity-forms'); ?></a>
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="column-date"><?php echo esc_html($type_label); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else : ?>
+                    <tr>
+                        <td colspan="4" style="padding:20px;">
+                            <?php
+                            echo wp_kses(
+                                sprintf(
+                                    /* translators: 1: opening anchor, 2: closing anchor */
+                                    __('You don\'t have any Paytm Form feeds configured. Let\'s go %1$screate one%2$s!', 'paytm-gravity-forms'),
+                                    '<a href="' . esc_url($add_new_url) . '">',
+                                    '</a>'
+                                ),
+                                array('a' => array('href' => true))
+                            );
+                            ?>
+                        </td>
+                    </tr>
+                <?php endif; ?>
             </tbody>
         </table>
     </form>
 </div>
 <script type="text/javascript">
-    function DeleteSetting(id){
-        jQuery("#action_argument").val(id);
-        jQuery("#action").val("delete");
-        jQuery("#feed_form")[0].submit();
+    function DeleteSetting(id) {
+        jQuery('#action_argument').val(id);
+        jQuery('#action').val('delete');
+        jQuery('#feed_form')[0].submit();
     }
-    function ToggleActive(img, feed_id){
-        var is_active = img.src.indexOf("active1.png") >=0
-        if(is_active){
-            img.src = img.src.replace("active1.png", "active0.png");
-            jQuery(img).attr('title','<?php esc_attr_e("Inactive", "paytm-gravity-forms") ?>').attr('alt', '<?php esc_attr_e("Inactive", "paytm-gravity-forms") ?>');
-        }
-        else{
-            img.src = img.src.replace("active0.png", "active1.png");
-            jQuery(img).attr('title','<?php esc_attr_e("Active", "paytm-gravity-forms") ?>').attr('alt', '<?php esc_attr_e("Active", "paytm-gravity-forms") ?>');
+
+    function ToggleActive(img, feed_id) {
+        var is_active = img.src.indexOf('active1.png') >= 0;
+        if (is_active) {
+            img.src = img.src.replace('active1.png', 'active0.png');
+            jQuery(img).attr('title', '<?php echo esc_js(__('Inactive', 'paytm-gravity-forms')); ?>').attr('alt', '<?php echo esc_js(__('Inactive', 'paytm-gravity-forms')); ?>');
+        } else {
+            img.src = img.src.replace('active0.png', 'active1.png');
+            jQuery(img).attr('title', '<?php echo esc_js(__('Active', 'paytm-gravity-forms')); ?>').attr('alt', '<?php echo esc_js(__('Active', 'paytm-gravity-forms')); ?>');
         }
 
         var mysack = new sack(ajaxurl);
         mysack.execute = 1;
         mysack.method = 'POST';
-        mysack.setVar( "action", "gf_paytm_form_update_feed_active" );
-        mysack.setVar( "gf_paytm_form_update_feed_active", "<?php echo wp_create_nonce("gf_paytm_form_update_feed_active") ?>" );
-        mysack.setVar( "feed_id", feed_id );
-        mysack.setVar( "is_active", is_active ? 0 : 1 );
-        mysack.onError = function() { alert('<?php esc_attr_e("Ajax error while updating feed", "paytm-gravity-forms" ) ?>' )};
+        mysack.setVar('action', 'gf_paytm_form_update_feed_active');
+        mysack.setVar('gf_paytm_form_update_feed_active', '<?php echo esc_js(wp_create_nonce('gf_paytm_form_update_feed_active')); ?>');
+        mysack.setVar('feed_id', feed_id);
+        mysack.setVar('is_active', is_active ? 0 : 1);
+        mysack.onError = function() {
+            alert('<?php echo esc_js(__('Ajax error while updating feed', 'paytm-gravity-forms')); ?>');
+        };
         mysack.runAJAX();
 
         return true;
     }
-
-
 </script>
         <?php
     }
@@ -828,20 +1120,6 @@ class GFPaytmForm {
             ?>
 </form>
 
-<form action="" method="post">
-            <?php wp_nonce_field("uninstall", "gf_paytm_form_uninstall") ?>
-            <?php if(GFCommon::current_user_can_any("paytm-gravity-forms_uninstall")){ ?>
-    <div class="hr-divider"></div>
-
-    <h3><?php esc_attr_e("Uninstall Paytm Form Add-On", "paytm-gravity-forms") ?></h3>
-    <div class="delete-alert"><?php esc_attr_e("Warning! This operation deletes ALL Paytm Form Feeds.", "paytm-gravity-forms") ?>
-                    <?php
-                    $uninstall_button = '<input type="submit" name="uninstall" value="' . esc_attr_e("Uninstall Paytm Form Add-On", "paytm-gravity-forms") . '" class="button" onclick="return confirm(\'' . esc_attr_e("Warning! ALL Paytm Form Feeds will be deleted. This cannot be undone. \'OK\' to delete, \'Cancel\' to stop", "paytm-gravity-forms") . '\');"/>';
-                    echo apply_filters("gform_paytm_form_uninstall_button", $uninstall_button);
-                    ?>
-    </div>
-            <?php } ?>
-</form>
         <?php
     }
 
@@ -856,182 +1134,7 @@ class GFPaytmForm {
         return $options;
     }
 
-    private static function stats_page(){
-        ?>
-<style>
-    .paytm_form_graph_container{clear:both; padding-left:5px; min-width:789px; margin-right:50px;}
-    .paytm_form_message_container{clear: both; padding-left:5px; text-align:center; padding-top:120px; border: 1px solid #CCC; background-color: #FFF; width:100%; height:160px;}
-    .paytm_form_summary_container {margin:30px 60px; text-align: center; min-width:740px; margin-left:50px;}
-    .paytm_form_summary_item {width:160px; background-color: #FFF; border: 1px solid #CCC; padding:14px 8px; margin:6px 3px 6px 0; display: -moz-inline-stack; display: inline-block; zoom: 1; *display: inline; text-align:center;}
-    .paytm_form_summary_value {font-size:20px; margin:5px 0; font-family:Georgia,"Times New Roman","Bitstream Charter",Times,serif}
-    .paytm_form_summary_title {}
-    #paytm_form_graph_tooltip {border:4px solid #b9b9b9; padding:11px 0 0 0; background-color: #f4f4f4; text-align:center; -moz-border-radius: 4px; -webkit-border-radius: 4px; border-radius: 4px; -khtml-border-radius: 4px;}
-    #paytm_form_graph_tooltip .tooltip_tip {width:14px; height:14px; background-image:url(<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/images/tooltip_tip.png); background-repeat: no-repeat; position: absolute; bottom:-14px; left:68px;}
-
-    .paytm_form_tooltip_date {line-height:130%; font-weight:bold; font-size:13px; color:#21759B;}
-    .paytm_form_tooltip_sales {line-height:130%;}
-    .paytm_form_tooltip_revenue {line-height:130%;}
-    .paytm_form_tooltip_revenue .paytm_form_tooltip_heading {}
-    .paytm_form_tooltip_revenue .paytm_form_tooltip_value {}
-    .paytm_form_trial_disclaimer {clear:both; padding-top:20px; font-size:10px;}
-</style>
-<script type="text/javascript" src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/flot/jquery.flot.min.js"></script>
-<script type="text/javascript" src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/js/currency.js"></script>
-
-<div class="wrap">
-    <img alt="<?php esc_attr_e("Paytm Form", "paytm-gravity-forms") ?>" style="margin: 15px 7px 0pt 0pt; float: left;" src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/images/paytm_form_wordpress_icon_32.jpg"/>
-    <h2><?php esc_attr_e("Paytm Form Stats", "paytm-gravity-forms") ?></h2>
-
-    <form method="post" action="">
-        <ul class="subsubsub">
-            <li><a class="<?php echo (!RGForms::get("tab") || RGForms::get("tab") == "daily") ? "current" : "" ?>" href="?page=gf_paytm_form&view=stats&id=<?php echo $_GET["id"] ?>"><?php esc_attr_e("Daily", "paytm-gravity-forms"); ?></a> | </li>
-            <li><a class="<?php echo RGForms::get("tab") == "weekly" ? "current" : ""?>" href="?page=gf_paytm_form&view=stats&id=<?php echo $_GET["id"] ?>&tab=weekly"><?php esc_attr_e("Weekly", "paytm-gravity-forms"); ?></a> | </li>
-            <li><a class="<?php echo RGForms::get("tab") == "monthly" ? "current" : ""?>" href="?page=gf_paytm_form&view=stats&id=<?php echo $_GET["id"] ?>&tab=monthly"><?php esc_attr_e("Monthly", "paytm-gravity-forms"); ?></a></li>
-        </ul>
-                <?php
-                $config = GFPaytmFormData::get_feed(RGForms::get("id"));
-
-                switch(RGForms::get("tab")){
-                    case "monthly" :
-                        $chart_info = self::monthly_chart_info($config);
-                    break;
-
-                    case "weekly" :
-                        $chart_info = self::weekly_chart_info($config);
-                    break;
-
-                    default :
-                        $chart_info = self::daily_chart_info($config);
-                    break;
-                }
-
-                if(!$chart_info["series"]){
-                    ?>
-        <div class="paytm_form_message_container"><?php esc_attr_e("No payments have been made yet.", "paytm-gravity-forms") ?> <?php echo $config["meta"]["trial_period_enabled"] && empty($config["meta"]["trial_amount"]) ? " **" : ""?></div>
-                    <?php
-                }
-                else{
-                    ?>
-        <div class="paytm_form_graph_container">
-            <div id="graph_placeholder" style="width:100%;height:300px;"></div>
-        </div>
-
-        <script type="text/javascript">
-            var paytm_form_graph_tooltips = <?php echo $chart_info["tooltips"] ?>;
-
-            jQuery.plot(jQuery("#graph_placeholder"), <?php echo $chart_info["series"] ?>, <?php echo $chart_info["options"] ?>);
-            jQuery(window).resize(function(){
-                jQuery.plot(jQuery("#graph_placeholder"), <?php echo $chart_info["series"] ?>, <?php echo $chart_info["options"] ?>);
-            });
-
-            var previousPoint = null;
-            jQuery("#graph_placeholder").bind("plothover", function (event, pos, item) {
-                startShowTooltip(item);
-            });
-
-            jQuery("#graph_placeholder").bind("plotclick", function (event, pos, item) {
-                startShowTooltip(item);
-            });
-
-            function startShowTooltip(item){
-                if (item) {
-                    if (!previousPoint || previousPoint[0] != item.datapoint[0]) {
-                        previousPoint = item.datapoint;
-
-                        jQuery("#paytm_form_graph_tooltip").remove();
-                        var x = item.datapoint[0].toFixed(2),
-                            y = item.datapoint[1].toFixed(2);
-
-                        showTooltip(item.pageX, item.pageY, paytm_form_graph_tooltips[item.dataIndex]);
-                    }
-                }
-                else {
-                    jQuery("#paytm_form_graph_tooltip").remove();
-                    previousPoint = null;
-                }
-            }
-
-            function showTooltip(x, y, contents) {
-                jQuery('<div id="paytm_form_graph_tooltip">' + contents + '<div class="tooltip_tip"></div></div>').css( {
-                    position: 'absolute',
-                    display: 'none',
-                    opacity: 0.90,
-                    width:'150px',
-                    height:'<?php echo $config["meta"]["type"] == "subscription" ? "75px" : "60px" ;?>',
-                    top: y - <?php echo $config["meta"]["type"] == "subscription" ? "100" : "89" ;?>,
-                    left: x - 79
-                }).appendTo("body").fadeIn(200);
-            }
-
-
-            function convertToMoney(number){
-                var currency = getCurrentCurrency();
-                return currency.toMoney(number);
-            }
-            function formatWeeks(number){
-                number = number + "";
-                return "<?php esc_attr_e("Week ", "paytm-gravity-forms") ?>" + number.substring(number.length-2);
-            }
-
-            function getCurrentCurrency(){
-                <?php
-                if(!class_exists("RGCurrency"))
-                    require_once(ABSPATH . "/" . PLUGINDIR . "/gravityforms/currency.php");
-
-                $current_currency = RGCurrency::get_currency(GFCommon::get_currency());
-                ?>
-                var currency = new Currency(<?php echo GFCommon::json_encode($current_currency)?>);
-                return currency;
-            }
-        </script>
-                <?php
-                }
-                $payment_totals = RGFormsModel::get_form_payment_totals($config["form_id"]);
-                $transaction_totals = GFPaytmFormData::get_transaction_totals($config["form_id"]);
-
-                switch($config["meta"]["type"]){
-                    case "product" :
-                        $total_sales = $payment_totals["orders"];
-                        $sales_label = esc_attr_e("Total Orders", "paytm-gravity-forms");
-                    break;
-
-                    case "donation" :
-                        $total_sales = $payment_totals["orders"];
-                        $sales_label = esc_attr_e("Total Donations", "paytm-gravity-forms");
-                    break;
-                }
-
-                $total_revenue = empty($transaction_totals["payment"]["revenue"]) ? 0 : $transaction_totals["payment"]["revenue"];
-                ?>
-        <div class="paytm_form_summary_container">
-            <div class="paytm_form_summary_item">
-                <div class="paytm_form_summary_title"><?php esc_attr_e("Total Revenue", "paytm-gravity-forms")?></div>
-                <div class="paytm_form_summary_value"><?php echo GFCommon::to_money($total_revenue) ?></div>
-            </div>
-            <div class="paytm_form_summary_item">
-                <div class="paytm_form_summary_title"><?php echo $chart_info["revenue_label"]?></div>
-                <div class="paytm_form_summary_value"><?php echo $chart_info["revenue"] ?></div>
-            </div>
-            <div class="paytm_form_summary_item">
-                <div class="paytm_form_summary_title"><?php echo $sales_label?></div>
-                <div class="paytm_form_summary_value"><?php echo $total_sales ?></div>
-            </div>
-            <div class="paytm_form_summary_item">
-                <div class="paytm_form_summary_title"><?php echo $chart_info["sales_label"] ?></div>
-                <div class="paytm_form_summary_value"><?php echo $chart_info["sales"] ?></div>
-            </div>
-        </div>
-                <?php
-                if(!$chart_info["series"] && $config["meta"]["trial_period_enabled"] && empty($config["meta"]["trial_amount"])){
-                    ?>
-        <div class="paytm_form_trial_disclaimer"><?php esc_attr_e("** Free trial transactions will only be reflected in the graph after the first payment is made (i.e. after trial period ends)", "paytm-gravity-forms") ?></div>
-                    <?php
-                }
-                ?>
-    </form>
-</div>
-        <?php
-    }
+   
     private function get_graph_timestamp($local_datetime){
         $local_timestamp = mysql2date("G", $local_datetime); //getting timestamp with timezone adjusted
         $local_date_timestamp = mysql2date("G", gmdate("Y-m-d 23:59:59", $local_timestamp)); //setting time portion of date to midnight (to match the way Javascript handles dates)
@@ -1246,309 +1349,565 @@ class GFPaytmForm {
     }
 
     // Edit Page
-    private static function edit_page(){
-        ?>
-<style>
-    #paytm_form_submit_container{clear:both;}
-    .paytm_form_col_heading{padding-bottom:2px; border-bottom: 1px solid #ccc; font-weight:bold; width:120px;}
-    .paytm_form_field_cell {padding: 6px 17px 0 0; margin-right:15px;}
-
-    .paytm_form_validation_error{ background-color:#FFDFDF; margin-top:4px; margin-bottom:6px; padding-top:6px; padding-bottom:6px; border:1px dotted #C89797;}
-    .paytm_form_validation_error span {color: red;}
-    .left_header{float:left; width:200px;}
-    .margin_vertical_10{margin: 10px 0; padding-left:5px;}
-    .margin_vertical_30{margin: 30px 0; padding-left:5px;}
-    .width-1{width:300px;}
-    .gf_paytm_form_invalid_form{margin-top:30px; background-color:#FFEBE8;border:1px solid #CC0000; padding:10px; width:600px;}
-</style>
-<script type="text/javascript">
-    var form = Array();
-    function ToggleNotifications(){
-
-        var container = jQuery("#gf_paytm_form_notification_container");
-        var isChecked = jQuery("#gf_paytm_form_delay_notifications").is(":checked");
-
-        if(isChecked){
-            container.slideDown();
-            var isLoaded = jQuery(".gf_paytm_form_notification").length > 0
-            if(!isLoaded){
-                container.html("<li><img src='<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/images/loading.gif' title='<?php esc_attr_e("Please wait...", "paytm-gravity-forms"); ?>'></li>");
-                jQuery.post(ajaxurl, {
-                    action: "gf_paytm_form_load_notifications",
-                    form_id: form["id"],
-                    },
-                    function(response){
-
-                        var notifications = jQuery.parseJSON(response);
-                        if(!notifications){
-                            container.html("<li><div class='error' padding='20px;'><?php esc_attr_e("Notifications could not be loaded. Please try again later or contact support", "paytm-gravity-forms") ?></div></li>");
-                        }
-                        else if(notifications.length == 0){
-                            container.html("<li><div class='error' padding='20px;'><?php esc_attr_e("The form selected does not have any notifications.", "paytm-gravity-forms") ?></div></li>");
-                        }
-                        else{
-                            var str = "";
-                            for(var i=0; i<notifications.length; i++){
-                                str += "<li class='gf_paytm_form_notification'>"
-                                    +       "<input type='checkbox' value='" + notifications[i]["id"] + "' name='gf_paytm_form_selected_notifications[]' id='gf_paytm_form_selected_notifications' checked='checked' /> "
-                                    +       "<label class='inline' for='gf_paytm_form_selected_notifications'>" + notifications[i]["name"] + "</label>";
-                                    +  "</li>";
-                            }
-                            container.html(str);
-                        }
-                    }
-                );
-            }
-            jQuery(".gf_paytm_form_notification input").prop("checked", true);
+    private static function edit_page() {
+        $id = !empty($_POST['paytm_form_setting_id']) ? absint($_POST['paytm_form_setting_id']) : absint(rgget('id'));
+        $config = empty($id) ? array('meta' => array(), 'is_active' => true, 'form_id' => 0) : GFPaytmFormData::get_feed($id);
+        if (!is_array($config)) {
+            $config = array('meta' => array(), 'is_active' => true, 'form_id' => 0);
         }
-        else{
-            container.slideUp();
-            jQuery(".gf_paytm_form_notification input").prop("checked", false);
+        if (!isset($config['meta']) || !is_array($config['meta'])) {
+            $config['meta'] = array();
         }
-    }
-</script>
-<div class="wrap">
-    <img alt="<?php esc_attr_e("Paytm Form", "paytm-gravity-forms") ?>" style="margin: 15px 7px 0pt 0pt; float: left;" src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/images/paytm_form_wordpress_icon_32.jpg"/>
-    <h2><?php esc_attr_e("Paytm Form Transaction Settings", "paytm-gravity-forms") ?></h2>
 
-        <?php
-
-        //getting setting id (0 when creating a new one)
-        $id = !empty($_POST["paytm_form_setting_id"]) ? $_POST["paytm_form_setting_id"] : absint($_GET["id"]);
-        $config = empty($id) ? array("meta" => array(), "is_active" => true) : GFPaytmFormData::get_feed($id);
         $is_validation_error = false;
-        
-        $config["form_id"] = rgpost("gf_paytm_form_submit") ? absint(rgpost("gf_paytm_form_form")) : $config["form_id"];
+        $saved_notice = '';
 
-        $form = isset($config["form_id"]) && $config["form_id"] ? $form = RGFormsModel::get_form_meta($config["form_id"]) : array();
+        if (rgpost('gf_paytm_form_submit')) {
+            check_admin_referer('gf_paytm_form_edit_feed', 'gf_paytm_form_edit_feed');
 
-        //updating meta information
-        if(rgpost("gf_paytm_form_submit")){
-            
-            $config["meta"]["type"] = rgpost("gf_paytm_form_type");
-            $config["meta"]["cancel_url"] = rgpost("gf_paytm_form_cancel_url");
-            $config["meta"]["delay_post"] = rgpost('gf_paytm_form_delay_post');
-            $config["meta"]["update_post_action"] = rgpost('gf_paytm_form_update_action');
-
-            if(isset($form["notifications"])){
-                //new notification settings
-                $config["meta"]["delay_notifications"] = rgpost('gf_paytm_form_delay_notifications');
-                $config["meta"]["selected_notifications"] = $config["meta"]["delay_notifications"] ? rgpost('gf_paytm_form_selected_notifications') : array();
-
-                if(isset($config["meta"]["delay_autoresponder"]))
-                    unset($config["meta"]["delay_autoresponder"]);
-                if(isset($config["meta"]["delay_notification"]))
-                    unset($config["meta"]["delay_notification"]);
+            $config['form_id'] = absint(rgpost('gf_paytm_form_form'));
+            $form = $config['form_id'] ? RGFormsModel::get_form_meta($config['form_id']) : array();
+            if (!is_array($form)) {
+                $form = array();
             }
 
-            // paytm_form conditional
-            $config["meta"]["paytm_form_conditional_enabled"] = rgpost('gf_paytm_form_conditional_enabled');
-            $config["meta"]["paytm_form_conditional_field_id"] = rgpost('gf_paytm_form_conditional_field_id');
-            $config["meta"]["paytm_form_conditional_operator"] = rgpost('gf_paytm_form_conditional_operator');
-            $config["meta"]["paytm_form_conditional_value"] = rgpost('gf_paytm_form_conditional_value');
+            $config['meta']['type'] = sanitize_key(rgpost('gf_paytm_form_type'));
+            $config['meta']['cancel_url'] = esc_url_raw(rgpost('gf_paytm_form_cancel_url'));
+            $config['meta']['delay_post'] = rgpost('gf_paytm_form_delay_post') ? '1' : '';
+            $config['meta']['update_post_action'] = sanitize_key(rgpost('gf_paytm_form_update_action'));
 
-            //-----------------
+            if (isset($form['notifications'])) {
+                $config['meta']['delay_notifications'] = rgpost('gf_paytm_form_delay_notifications') ? '1' : '';
+                $selected_notifications = rgpost('gf_paytm_form_selected_notifications');
+                $config['meta']['selected_notifications'] = ($config['meta']['delay_notifications'] && is_array($selected_notifications))
+                    ? array_map('sanitize_text_field', $selected_notifications)
+                    : array();
 
-            $customer_fields = self::get_customer_fields();
-            $config["meta"]["customer_fields"] = array();
-            foreach($customer_fields as $field){
-                $config["meta"]["customer_fields"][$field["name"]] = $_POST["paytm_form_customer_field_{$field["name"]}"];
+                unset($config['meta']['delay_autoresponder'], $config['meta']['delay_notification']);
+            } else {
+                $config['meta']['delay_notification'] = rgpost('gf_paytm_form_delay_notification') ? '1' : '';
+                $config['meta']['delay_autoresponder'] = rgpost('gf_paytm_form_delay_autoresponder') ? '1' : '';
+            }
+
+            $config['meta']['paytm_form_conditional_enabled'] = rgpost('gf_paytm_form_conditional_enabled') ? '1' : '';
+            $config['meta']['paytm_form_conditional_field_id'] = sanitize_text_field(rgpost('gf_paytm_form_conditional_field_id'));
+            $config['meta']['paytm_form_conditional_operator'] = sanitize_text_field(rgpost('gf_paytm_form_conditional_operator'));
+            $config['meta']['paytm_form_conditional_value'] = sanitize_text_field(rgpost('gf_paytm_form_conditional_value'));
+
+            $config['meta']['customer_fields'] = array();
+            foreach (self::get_customer_fields() as $field) {
+                $field_key = 'paytm_form_customer_field_' . $field['name'];
+                $config['meta']['customer_fields'][$field['name']] = isset($_POST[$field_key])
+                    ? sanitize_text_field(wp_unslash($_POST[$field_key]))
+                    : '';
             }
 
             $config = apply_filters('gform_paytm_form_save_config', $config);
+            $is_validation_error = (bool) apply_filters('gform_paytm_form_config_validation', false, $config);
 
-            $is_validation_error = apply_filters("gform_paytm_form_config_validation", false, $config);
-
-            if(!$is_validation_error){
-                $id = GFPaytmFormData::update_feed($id, $config["form_id"], $config["is_active"], $config["meta"]);
-                ?>
-    <div class="updated fade" style="padding:6px"><?php echo sprintf(esc_attr_e("Feed Updated. %sback to list%s", "paytm-gravity-forms"), "<a href='?page=gf_paytm_form'>", "</a>") ?></div>
-                <?php
+            if (!$is_validation_error) {
+                $id = GFPaytmFormData::update_feed($id, $config['form_id'], !empty($config['is_active']), $config['meta']);
+                $saved_notice = sprintf(
+                    /* translators: 1: opening anchor, 2: closing anchor */
+                    __('Feed updated. %1$sBack to list%2$s', 'paytm-gravity-forms'),
+                    '<a href="' . esc_url(admin_url('admin.php?page=gf_paytm_form')) . '">',
+                    '</a>'
+                );
             }
-            else{
-                $is_validation_error = true;
+        } else {
+            $config['form_id'] = absint(rgar($config, 'form_id'));
+            $form = $config['form_id'] ? RGFormsModel::get_form_meta($config['form_id']) : array();
+            if (!is_array($form)) {
+                $form = array();
             }
-
         }
 
+        $feed_type = rgars($config, 'meta/type');
+        $has_type = !empty($feed_type);
+        $has_form = !empty($config['form_id']);
+        $display_post_fields = !empty($form) && !empty($form['fields']) && GFCommon::has_post_field($form['fields']);
+        $has_delayed_notifications = rgar($config['meta'], 'delay_notifications') || rgar($config['meta'], 'delay_notification') || rgar($config['meta'], 'delay_autoresponder');
+        $list_url = admin_url('admin.php?page=gf_paytm_form');
+        $plugin_img = GF_PAYTM_FORM_BASE_URL . '/images/paytm_form_wordpress_icon_32.jpg';
+        $loading_img = GF_PAYTM_FORM_BASE_URL . '/images/loading.gif';
+        $selected_notifications = (!empty($form) && isset($form['notifications'])) ? self::get_selected_notifications($config, $form) : array();
+        $submit_label = empty($id) ? __('Save Feed', 'paytm-gravity-forms') : __('Update Feed', 'paytm-gravity-forms');
         ?>
-    <form method="post" action="">
-        <input type="hidden" name="paytm_form_setting_id" value="<?php echo $id ?>" />
+<style>
+    .paytm-feed-edit {
+        --paytm-accent: #00b9f5;
+        --paytm-ink: #0f2b46;
+        --paytm-muted: #5b6b7c;
+        --paytm-border: #d9e2ec;
+        --paytm-soft: #f4f8fb;
+        --paytm-card: #ffffff;
+        max-width: 920px;
+        margin-top: 12px;
+    }
+    .paytm-feed-edit__header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin: 8px 0 22px;
+        padding: 18px 20px;
+        border-radius: 14px;
+        background:
+            radial-gradient(circle at top right, rgba(0, 185, 245, 0.18), transparent 42%),
+            linear-gradient(135deg, #0f2b46 0%, #163a5f 55%, #0f2b46 100%);
+        color: #fff;
+        box-shadow: 0 10px 28px rgba(15, 43, 70, 0.18);
+    }
+    .paytm-feed-edit__header img {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        background: #fff;
+        padding: 4px;
+        box-sizing: border-box;
+    }
+    .paytm-feed-edit__header h2 {
+        margin: 0;
+        padding: 0;
+        border: 0;
+        color: #fff;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+    }
+    .paytm-feed-edit__header p {
+        margin: 4px 0 0;
+        color: rgba(255,255,255,0.78);
+        font-size: 13px;
+    }
+    .paytm-feed-card {
+        background: var(--paytm-card);
+        border: 1px solid var(--paytm-border);
+        border-radius: 14px;
+        padding: 20px 22px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 2px rgba(15, 43, 70, 0.04);
+    }
+    .paytm-feed-card__title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--paytm-accent);
+    }
+    .paytm-feed-card__subtitle {
+        margin: 6px 0 16px;
+        color: var(--paytm-muted);
+        font-size: 13px;
+        line-height: 1.5;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: 0;
+    }
+    .paytm-feed-label {
+        float: none;
+        width: 200px;
+        flex: 0 0 200px;
+        margin: 0;
+    }
+    .paytm-feed-label label,
+    .paytm-feed-label .left_header {
+        display: block;
+        float: none;
+        width: auto;
+        margin: 0 0 4px;
+        font-weight: 600;
+        color: var(--paytm-ink);
+    }
+    .paytm-feed-subtitle {
+        margin: 0;
+        color: var(--paytm-muted);
+        font-size: 12.5px;
+        line-height: 1.45;
+        font-weight: 400;
+    }
+    .paytm-feed-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 18px;
+        margin: 0 0 18px;
+    }
+    .paytm-feed-row:last-child { margin-bottom: 0; }
+    .paytm-feed-row .left_header {
+        float: none;
+        width: 200px;
+        flex: 0 0 200px;
+        margin: 8px 0 0;
+        font-weight: 600;
+        color: var(--paytm-ink);
+    }
+    .paytm-feed-row__control { flex: 1; min-width: 0; }
+    .paytm-feed-edit select,
+    .paytm-feed-edit input[type="text"] {
+        min-width: 280px;
+        max-width: 100%;
+        border-radius: 8px;
+        border-color: var(--paytm-border);
+        padding: 6px 10px;
+        box-shadow: none;
+    }
+    .paytm-feed-edit select:focus,
+    .paytm-feed-edit input[type="text"]:focus {
+        border-color: var(--paytm-accent);
+        box-shadow: 0 0 0 1px var(--paytm-accent);
+    }
+    .paytm-feed-options {
+        margin: 0;
+        padding: 12px 14px;
+        list-style: none;
+        background: var(--paytm-soft);
+        border: 1px solid var(--paytm-border);
+        border-radius: 10px;
+    }
+    .paytm-feed-options li {
+        margin: 0 0 10px;
+        padding: 0;
+    }
+    .paytm-feed-options li:last-child { margin-bottom: 0; }
+    .paytm-feed-options label.inline {
+        font-weight: 500;
+        color: var(--paytm-ink);
+    }
+    #gf_paytm_form_notification_container {
+        margin: 10px 0 0;
+        padding: 10px 12px !important;
+        background: #fff;
+        border: 1px dashed var(--paytm-border);
+        border-radius: 8px;
+    }
+    #paytm_form_customer_fields table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: hidden;
+        border: 1px solid var(--paytm-border);
+        border-radius: 10px;
+        background: #fff;
+    }
+    .paytm_form_col_heading {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--paytm-border);
+        background: var(--paytm-soft);
+        font-weight: 700;
+        width: auto;
+        color: var(--paytm-ink);
+    }
+    .paytm_form_field_cell {
+        padding: 10px 14px;
+        margin: 0;
+        border-bottom: 1px solid var(--paytm-border);
+        color: var(--paytm-muted);
+    }
+    #paytm_form_customer_fields tr:last-child .paytm_form_field_cell {
+        border-bottom: 0;
+    }
+    .paytm_form_validation_error {
+        background: #fff5f5;
+        margin: 0 0 16px;
+        padding: 12px 14px;
+        border: 1px solid #f1b7b7;
+        border-radius: 10px;
+        color: #9b1c1c;
+    }
+    .gf_paytm_form_invalid_form {
+        margin-top: 14px;
+        background: #fff5f5;
+        border: 1px solid #f1b7b7;
+        border-radius: 10px;
+        padding: 12px 14px;
+        width: auto;
+        max-width: 640px;
+        color: #9b1c1c;
+    }
+    #paytm_form_submit_container {
+        clear: both;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-top: 8px;
+    }
+    #paytm_form_submit_container .button-primary {
+        background: var(--paytm-accent);
+        border-color: #00a7dd;
+        text-shadow: none;
+        box-shadow: none;
+        border-radius: 8px;
+        padding: 0 18px;
+        height: 36px;
+        line-height: 34px;
+    }
+    #paytm_form_submit_container .button-primary:hover,
+    #paytm_form_submit_container .button-primary:focus {
+        background: #00a7dd;
+        border-color: #0095c5;
+    }
+    #paytm_form_submit_container .button {
+        border-radius: 8px;
+        height: 36px;
+        line-height: 34px;
+    }
+    #gf_paytm_form_conditional_container {
+        margin-top: 10px;
+        padding: 12px 14px;
+        background: var(--paytm-soft);
+        border: 1px solid var(--paytm-border);
+        border-radius: 10px;
+    }
+    #gf_paytm_form_conditional_fields {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+    .width-1 { width: min(100%, 420px); }
+    .margin_vertical_10, .margin_vertical_30 { margin: 0; padding: 0; }
+    .left_header { float: left; width: 200px; }
 
-        <div class="margin_vertical_10 <?php echo $is_validation_error ? "paytm_form_validation_error" : "" ?>">
-                <?php
-                if($is_validation_error){
-                    ?>
-            <span><?php esc_attr_e('There was an issue saving your feed. Please address the errors below and try again.'); ?></span>
-                    <?php
-                }
-                ?>
-        </div> <!-- / validation message -->
-        <div class="margin_vertical_10">
-            <label class="left_header" for="gf_paytm_form_type"><?php esc_attr_e("Transaction Type", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_transaction_type") ?></label>
+    @media (max-width: 782px) {
+        .paytm-feed-row { flex-direction: column; gap: 8px; }
+        .paytm-feed-row .left_header,
+        .paytm-feed-label { width: auto; flex: none; margin: 0; }
+        .paytm-feed-edit select,
+        .paytm-feed-edit input[type="text"] { min-width: 0; width: 100%; }
+    }
+</style>
+<script type="text/javascript">
+    var form = [];
+    function ToggleNotifications() {
+        var container = jQuery('#gf_paytm_form_notification_container');
+        var isChecked = jQuery('#gf_paytm_form_delay_notifications').is(':checked');
 
-            <select id="gf_paytm_form_type" name="gf_paytm_form_type" onchange="SelectType(jQuery(this).val());">
-                <option value=""><?php esc_attr_e("Select a transaction type", "paytm-gravity-forms") ?></option>
-                <option value="donation" <?php echo rgar($config['meta'], 'type') == "donation" ? "selected='selected'" : "" ?>><?php esc_attr_e("Donations", "paytm-gravity-forms") ?></option>
-            </select>
-        </div>
-        <div id="paytm_form_form_container" valign="top" class="margin_vertical_10" <?php echo empty($config["meta"]["type"]) ? "style='display:none;'" : "" ?>>
-            <label for="gf_paytm_form_form" class="left_header"><?php esc_attr_e("Gravity Form", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_gravity_form") ?></label>
-
-            <select id="gf_paytm_form_form" name="gf_paytm_form_form" onchange="SelectForm(jQuery('#gf_paytm_form_type').val(), jQuery(this).val(), '<?php echo rgar($config, 'id') ?>');">
-                <option value=""><?php esc_attr_e("Select a form", "paytm-gravity-forms"); ?> </option>
-                    <?php
-
-                    $active_form = rgar($config, 'form_id');
-                    $available_forms = GFPaytmFormData::get_available_forms($active_form);
-
-                    foreach($available_forms as $current_form) {
-                        $selected = absint($current_form->id) == rgar($config, 'form_id') ? 'selected="selected"' : '';
-                        ?>
-
-                <option value="<?php echo absint($current_form->id) ?>" <?php echo $selected; ?>><?php echo esc_html($current_form->title) ?></option>
-
-                        <?php
+        if (isChecked) {
+            container.slideDown();
+            if (jQuery('.gf_paytm_form_notification').length === 0) {
+                container.html("<li><img src='<?php echo esc_url($loading_img); ?>' title='<?php echo esc_js(__('Please wait...', 'paytm-gravity-forms')); ?>' alt=''/></li>");
+                jQuery.post(ajaxurl, {
+                    action: 'gf_paytm_form_load_notifications',
+                    form_id: form['id']
+                }, function(response) {
+                    var notifications = jQuery.parseJSON(response);
+                    if (!notifications) {
+                        container.html("<li><div class='error'><?php echo esc_js(__('Notifications could not be loaded. Please try again later or contact support', 'paytm-gravity-forms')); ?></div></li>");
+                    } else if (notifications.length === 0) {
+                        container.html("<li><div class='error'><?php echo esc_js(__('The form selected does not have any notifications.', 'paytm-gravity-forms')); ?></div></li>");
+                    } else {
+                        var str = '';
+                        for (var i = 0; i < notifications.length; i++) {
+                            str += "<li class='gf_paytm_form_notification'>"
+                                + "<input type='checkbox' value='" + notifications[i]['id'] + "' name='gf_paytm_form_selected_notifications[]' id='gf_paytm_form_selected_notifications_" + i + "' checked='checked' /> "
+                                + "<label class='inline' for='gf_paytm_form_selected_notifications_" + i + "'>" + notifications[i]['name'] + "</label>"
+                                + "</li>";
+                        }
+                        container.html(str);
                     }
-                    ?>
-            </select>
-            &nbsp;&nbsp;
-            <img src="<?php echo esc_attr(GF_PAYTM_FORM_BASE_URL) ?>/images/loading.gif" id="paytm_form_wait" style="display: none;"/>
-
-            <div id="gf_paytm_form_invalid_product_form" class="gf_paytm_form_invalid_form"  style="display:none;">
-                    <?php esc_attr_e("The form selected does not have any Product fields. Please add a Product field to the form and try again.", "paytm-gravity-forms") ?>
-            </div>
-            <div id="gf_paytm_form_invalid_donation_form" class="gf_paytm_form_invalid_form" style="display:none;">
-                    <?php esc_attr_e("The form selected does not have any Product fields. Please add a Product field to the form and try again.", "paytm-gravity-forms") ?>
-            </div>
+                });
+            }
+            jQuery('.gf_paytm_form_notification input').prop('checked', true);
+        } else {
+            container.slideUp();
+            jQuery('.gf_paytm_form_notification input').prop('checked', false);
+        }
+    }
+</script>
+<div class="wrap paytm-feed-edit">
+    <div class="paytm-feed-edit__header">
+        <img alt="<?php echo esc_attr__('Paytm Form', 'paytm-gravity-forms'); ?>" src="<?php echo esc_url($plugin_img); ?>"/>
+        <div>
+            <h2><?php esc_html_e('Paytm Form Transaction Settings', 'paytm-gravity-forms'); ?></h2>
+            <p><?php esc_html_e('Map a Gravity Form to Paytm donations and payment notifications.', 'paytm-gravity-forms'); ?></p>
         </div>
-        <div id="paytm_form_field_group" valign="top" <?php echo empty($config["meta"]["type"]) || empty($config["form_id"]) ? "style='display:none;'" : "" ?>>
+    </div>
 
-            <div class="margin_vertical_10">
-                <label class="left_header"><?php esc_attr_e("Customer", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_customer") ?></label>
+    <?php if ($saved_notice) : ?>
+        <div class="updated fade" style="padding:10px 14px; border-radius:10px;"><?php echo wp_kses($saved_notice, array('a' => array('href' => true))); ?></div>
+    <?php endif; ?>
 
-                <div id="paytm_form_customer_fields">
-                        <?php
-                            if(!empty($form))
-                                echo self::get_customer_information($form, $config);
-                        ?>
+    <form method="post" action="">
+        <?php wp_nonce_field('gf_paytm_form_edit_feed', 'gf_paytm_form_edit_feed'); ?>
+        <input type="hidden" name="paytm_form_setting_id" value="<?php echo esc_attr($id); ?>" />
+
+        <?php if ($is_validation_error) : ?>
+            <div class="paytm_form_validation_error">
+                <span><?php esc_html_e('There was an issue saving your feed. Please address the errors below and try again.', 'paytm-gravity-forms'); ?></span>
+            </div>
+        <?php endif; ?>
+
+        <div class="paytm-feed-card">
+            <h3 class="paytm-feed-card__title"><?php esc_html_e('Feed Setup', 'paytm-gravity-forms'); ?></h3>
+            <p class="paytm-feed-card__subtitle"><?php esc_html_e('Choose the payment type and connect it to a Gravity Form.', 'paytm-gravity-forms'); ?></p>
+
+            <div class="paytm-feed-row margin_vertical_10">
+                <div class="paytm-feed-label">
+                    <label class="left_header" for="gf_paytm_form_type"><?php esc_html_e('Transaction Type', 'paytm-gravity-forms'); ?></label>
+                    <p class="paytm-feed-subtitle"><?php esc_html_e('Select how this feed should process payments, such as donations.', 'paytm-gravity-forms'); ?></p>
+                </div>
+                <div class="paytm-feed-row__control">
+                    <select id="gf_paytm_form_type" name="gf_paytm_form_type" onchange="SelectType(jQuery(this).val());">
+                        <option value=""><?php esc_html_e('Select a transaction type', 'paytm-gravity-forms'); ?></option>
+                        <option value="donation" <?php selected($feed_type, 'donation'); ?>><?php esc_html_e('Donations', 'paytm-gravity-forms'); ?></option>
+                    </select>
                 </div>
             </div>
 
-            <div class="margin_vertical_10">
-                <label class="left_header" for="gf_paytm_form_cancel_url"><?php esc_attr_e("Cancel URL", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_cancel_url") ?></label>
-                <input type="text" name="gf_paytm_form_cancel_url" id="gf_paytm_form_cancel_url" class="width-1" value="<?php echo rgars($config, "meta/cancel_url") ?>"/>
-            </div>
-
-            <div class="margin_vertical_10">
-                <ul style="overflow:hidden;">
-
-                    <li id="paytm_form_delay_notification" <?php echo isset($form["notifications"]) ? "style='display:none;'" : "" ?>>
-                        <input type="checkbox" name="gf_paytm_form_delay_notification" id="gf_paytm_form_delay_notification" value="1" <?php echo rgar($config["meta"], 'delay_notification') ? "checked='checked'" : ""?> />
-                        <label class="inline" for="gf_paytm_form_delay_notification"><?php esc_attr_e("Send admin notification only when payment is received.", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_delay_admin_notification") ?></label>
-                    </li>
-                    <li id="paytm_form_delay_autoresponder" <?php echo isset($form["notifications"]) ? "style='display:none;'" : "" ?>>
-                        <input type="checkbox" name="gf_paytm_form_delay_autoresponder" id="gf_paytm_form_delay_autoresponder" value="1" <?php echo rgar($config["meta"], 'delay_autoresponder') ? "checked='checked'" : ""?> />
-                        <label class="inline" for="gf_paytm_form_delay_autoresponder"><?php esc_attr_e("Send user notification only when payment is received.", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_delay_user_notification") ?></label>
-                    </li>
-
+            <div id="paytm_form_form_container" class="paytm-feed-row margin_vertical_10" <?php echo $has_type ? '' : "style='display:none;'"; ?>>
+                <div class="paytm-feed-label">
+                    <label for="gf_paytm_form_form" class="left_header"><?php esc_html_e('Gravity Form', 'paytm-gravity-forms'); ?></label>
+                    <p class="paytm-feed-subtitle"><?php esc_html_e('Pick the form that should send submissions to Paytm for payment.', 'paytm-gravity-forms'); ?></p>
+                </div>
+                <div class="paytm-feed-row__control">
+                    <select id="gf_paytm_form_form" name="gf_paytm_form_form" onchange="SelectForm(jQuery('#gf_paytm_form_type').val(), jQuery(this).val(), '<?php echo esc_js(rgar($config, 'id')); ?>');">
+                        <option value=""><?php esc_html_e('Select a form', 'paytm-gravity-forms'); ?></option>
                         <?php
-                        $display_post_fields = !empty($form) ? GFCommon::has_post_field($form["fields"]) : false;
-                        ?>
-                    <li id="paytm_form_post_action" <?php echo $display_post_fields ? "" : "style='display:none;'" ?>>
-                        <input type="checkbox" name="gf_paytm_form_delay_post" id="gf_paytm_form_delay_post" value="1" <?php echo rgar($config["meta"],"delay_post") ? "checked='checked'" : ""?> />
-                        <label class="inline" for="gf_paytm_form_delay_post"><?php esc_attr_e("Create post only when payment is received.", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_delay_post") ?></label>
-                    </li>
-
-                    <li id="paytm_form_post_update_action" <?php echo $display_post_fields && $config["meta"]["type"] == "subscription" ? "" : "style='display:none;'" ?>>
-                        <input type="checkbox" name="gf_paytm_form_update_post" id="gf_paytm_form_update_post" value="1" <?php echo rgar($config["meta"],"update_post_action") ? "checked='checked'" : ""?> onclick="var action = this.checked ? 'draft' : ''; jQuery('#gf_paytm_form_update_action').val(action);" />
-                        <label class="inline" for="gf_paytm_form_update_post"><?php esc_attr_e("Update Post when subscription is cancelled.", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_update_post") ?></label>
-                        <select id="gf_paytm_form_update_action" name="gf_paytm_form_update_action" onchange="var checked = jQuery(this).val() ? 'checked' : false; jQuery('#gf_paytm_form_update_post').attr('checked', checked);">
-                            <option value=""></option>
-                            <option value="draft" <?php echo rgar($config["meta"],"update_post_action") == "draft" ? "selected='selected'" : ""?>><?php esc_attr_e("Mark Post as Draft", "paytm-gravity-forms") ?></option>
-                            <option value="delete" <?php echo rgar($config["meta"],"update_post_action") == "delete" ? "selected='selected'" : ""?>><?php esc_attr_e("Delete Post", "paytm-gravity-forms") ?></option>
-                        </select>
-                    </li>
-
-                        <?php do_action("gform_paytm_form_action_fields", $config, $form) ?>
-                </ul>
+                        $active_form = rgar($config, 'form_id');
+                        $available_forms = GFPaytmFormData::get_available_forms($active_form);
+                        foreach ($available_forms as $current_form) :
+                            ?>
+                            <option value="<?php echo esc_attr(absint($current_form->id)); ?>" <?php selected(absint($current_form->id), absint($active_form)); ?>><?php echo esc_html($current_form->title); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <img src="<?php echo esc_url($loading_img); ?>" id="paytm_form_wait" alt="" style="display:none; vertical-align:middle; margin-left:8px;"/>
+                    <div id="gf_paytm_form_invalid_product_form" class="gf_paytm_form_invalid_form" style="display:none;">
+                        <?php esc_html_e('The form selected does not have any Product fields. Please add a Product field to the form and try again.', 'paytm-gravity-forms'); ?>
+                    </div>
+                    <div id="gf_paytm_form_invalid_donation_form" class="gf_paytm_form_invalid_form" style="display:none;">
+                        <?php esc_html_e('The form selected does not have any Product fields. Please add a Product field to the form and try again.', 'paytm-gravity-forms'); ?>
+                    </div>
+                </div>
             </div>
+        </div>
 
-            <div class="margin_vertical_10" id="gf_paytm_form_notifications" <?php echo !isset($form["notifications"]) ? "style='display:none;'" : "" ?>>
-                <label class="left_header"><?php esc_attr_e("Notifications", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_notifications") ?></label>
-                    <?php
-                    $has_delayed_notifications = rgar($config['meta'], 'delay_notifications') || rgar($config['meta'], 'delay_notification') || rgar($config['meta'], 'delay_autoresponder');
-                    ?>
-                <div style="overflow:hidden;">
-                    <input type="checkbox" name="gf_paytm_form_delay_notifications" id="gf_paytm_form_delay_notifications" value="1" onclick="ToggleNotifications();" <?php checked("1", $has_delayed_notifications)?> />
-                    <label class="inline" for="gf_paytm_form_delay_notifications"><?php esc_attr_e("Send notifications only when payment is received.", "paytm-gravity-forms"); ?></label>
-
-                    <ul id="gf_paytm_form_notification_container" style="padding-left:20px; <?php echo $has_delayed_notifications ? "" : "display:none;"?>">
+        <div id="paytm_form_field_group" <?php echo ($has_type && $has_form) ? '' : "style='display:none;'"; ?>>
+            <div class="paytm-feed-card">
+                <h3 class="paytm-feed-card__title"><?php esc_html_e('Customer Mapping', 'paytm-gravity-forms'); ?></h3>
+                <p class="paytm-feed-card__subtitle"><?php esc_html_e('Map customer details from your form fields and set a cancel redirect.', 'paytm-gravity-forms'); ?></p>
+                <div class="paytm-feed-row margin_vertical_10">
+                    <div class="paytm-feed-label">
+                        <label class="left_header"><?php esc_html_e('Customer', 'paytm-gravity-forms'); ?></label>
+                        <p class="paytm-feed-subtitle"><?php esc_html_e('Match Gravity Form fields to Paytm fields like name, email, phone, and amount.', 'paytm-gravity-forms'); ?></p>
+                    </div>
+                    <div class="paytm-feed-row__control" id="paytm_form_customer_fields">
                         <?php
-                        if(!empty($form) && is_array($form["notifications"])){
-                            $selected_notifications = self::get_selected_notifications($config, $form);
-
-                            foreach($form["notifications"] as $notification){
-                                ?>
-                        <li class="gf_paytm_form_notification">
-                            <input type="checkbox" name="gf_paytm_form_selected_notifications[]" id="gf_paytm_form_selected_notifications" value="<?php echo $notification["id"]?>" <?php checked(true, in_array($notification["id"], $selected_notifications))?> />
-                            <label class="inline" for="gf_paytm_form_selected_notifications"><?php echo $notification["name"]; ?></label>
-                        </li>
-                                <?php
-                            }
+                        if (!empty($form)) {
+                            echo self::get_customer_information($form, $config);
                         }
                         ?>
-                    </ul>
+                    </div>
+                </div>
+
+                <div class="paytm-feed-row margin_vertical_10">
+                    <div class="paytm-feed-label">
+                        <label class="left_header" for="gf_paytm_form_cancel_url"><?php esc_html_e('Cancel URL', 'paytm-gravity-forms'); ?></label>
+                        <p class="paytm-feed-subtitle"><?php esc_html_e('Optional page URL if the user cancels before completing payment.', 'paytm-gravity-forms'); ?></p>
+                    </div>
+                    <div class="paytm-feed-row__control">
+                        <input type="text" name="gf_paytm_form_cancel_url" id="gf_paytm_form_cancel_url" class="width-1" value="<?php echo esc_attr(rgars($config, 'meta/cancel_url')); ?>"/>
+                    </div>
                 </div>
             </div>
 
-                <?php do_action("gform_paytm_form_add_option_group", $config, $form); ?>
-
-            <div id="gf_paytm_form_conditional_section" valign="top" class="margin_vertical_10">
-                <label for="gf_paytm_form_conditional_optin" class="left_header"><?php esc_attr_e("Paytm Form Condition", "paytm-gravity-forms"); ?> <?php gform_tooltip("paytm_form_conditional") ?></label>
-
-                <div id="gf_paytm_form_conditional_option">
-                    <table cellspacing="0" cellpadding="0">
-                        <tr>
-                            <td>
-                                <input type="checkbox" id="gf_paytm_form_conditional_enabled" name="gf_paytm_form_conditional_enabled" value="1" onclick="if(this.checked){jQuery('#gf_paytm_form_conditional_container').fadeIn('fast');} else{ jQuery('#gf_paytm_form_conditional_container').fadeOut('fast'); }" <?php echo rgar($config['meta'], 'paytm_form_conditional_enabled') ? "checked='checked'" : ""?>/>
-                                <label for="gf_paytm_form_conditional_enable"><?php esc_attr_e("Enable", "paytm-gravity-forms"); ?></label>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>
-                                <div id="gf_paytm_form_conditional_container" <?php echo !rgar($config['meta'], 'paytm_form_conditional_enabled') ? "style='display:none'" : ""?>>
-
-                                    <div id="gf_paytm_form_conditional_fields" style="display:none">
-                                            <?php esc_attr_e("Send to Paytm Form if ", "paytm-gravity-forms") ?>
-                                        <select id="gf_paytm_form_conditional_field_id" name="gf_paytm_form_conditional_field_id" class="optin_select" onchange='jQuery("#gf_paytm_form_conditional_value_container").html(GetFieldValues(jQuery(this).val(), "", 20));'>
-                                        </select>
-                                        <select id="gf_paytm_form_conditional_operator" name="gf_paytm_form_conditional_operator">
-                                            <option value="is" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == "is" ? "selected='selected'" : "" ?>><?php esc_attr_e("is", "paytm-gravity-forms") ?></option>
-                                            <option value="isnot" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == "isnot" ? "selected='selected'" : "" ?>><?php esc_attr_e("is not", "paytm-gravity-forms") ?></option>
-                                            <option value=">" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == ">" ? "selected='selected'" : "" ?>><?php esc_attr_e("greater than", "paytm-gravity-forms") ?></option>
-                                            <option value="<" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == "<" ? "selected='selected'" : "" ?>><?php esc_attr_e("less than", "paytm-gravity-forms") ?></option>
-                                            <option value="contains" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == "contains" ? "selected='selected'" : "" ?>><?php esc_attr_e("contains", "paytm-gravity-forms") ?></option>
-                                            <option value="starts_with" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == "starts_with" ? "selected='selected'" : "" ?>><?php esc_attr_e("starts with", "paytm-gravity-forms") ?></option>
-                                            <option value="ends_with" <?php echo rgar($config['meta'], 'paytm_form_conditional_operator') == "ends_with" ? "selected='selected'" : "" ?>><?php esc_attr_e("ends with", "paytm-gravity-forms") ?></option>
-                                        </select>
-                                        <div id="gf_paytm_form_conditional_value_container" name="gf_paytm_form_conditional_value_container" style="display:inline;"></div>
-                                    </div>
-
-                                    <div id="gf_paytm_form_conditional_message" style="display:none">
-                                            <?php esc_attr_e("To create a registration condition, your form must have a field supported by conditional logic.", "paytm-gravity-forms") ?>
-                                    </div>
-
-                                </div>
-                            </td>
-                        </tr>
-                    </table>
+            <div class="paytm-feed-card">
+                <h3 class="paytm-feed-card__title"><?php esc_html_e('Payment Actions', 'paytm-gravity-forms'); ?></h3>
+                <p class="paytm-feed-card__subtitle"><?php esc_html_e('Control when notifications and related actions run after Paytm payment.', 'paytm-gravity-forms'); ?></p>
+                <div class="margin_vertical_10" style="display:none;">
+                    <ul class="paytm-feed-options">
+                        <li id="paytm_form_delay_notification" <?php echo isset($form['notifications']) ? "style='display:none;'" : ''; ?>>
+                            <input type="checkbox" name="gf_paytm_form_delay_notification" id="gf_paytm_form_delay_notification" value="1" <?php checked(!empty(rgar($config['meta'], 'delay_notification'))); ?> />
+                            <label class="inline" for="gf_paytm_form_delay_notification"><?php esc_html_e('Send admin notification only when payment is received.', 'paytm-gravity-forms'); ?></label>
+                        </li>
+                        <li id="paytm_form_delay_autoresponder" <?php echo isset($form['notifications']) ? "style='display:none;'" : ''; ?>>
+                            <input type="checkbox" name="gf_paytm_form_delay_autoresponder" id="gf_paytm_form_delay_autoresponder" value="1" <?php checked(!empty(rgar($config['meta'], 'delay_autoresponder'))); ?> />
+                            <label class="inline" for="gf_paytm_form_delay_autoresponder"><?php esc_html_e('Send user notification only when payment is received.', 'paytm-gravity-forms'); ?></label>
+                        </li>
+                        <li id="paytm_form_post_action" <?php echo $display_post_fields ? '' : "style='display:none;'"; ?>>
+                            <input type="checkbox" name="gf_paytm_form_delay_post" id="gf_paytm_form_delay_post" value="1" <?php checked(!empty(rgar($config['meta'], 'delay_post'))); ?> />
+                            <label class="inline" for="gf_paytm_form_delay_post"><?php esc_html_e('Create post only when payment is received.', 'paytm-gravity-forms'); ?></label>
+                        </li>
+                        <li id="paytm_form_post_update_action" <?php echo ($display_post_fields && $feed_type === 'subscription') ? '' : "style='display:none;'"; ?>>
+                            <input type="checkbox" name="gf_paytm_form_update_post" id="gf_paytm_form_update_post" value="1" <?php checked(!empty(rgar($config['meta'], 'update_post_action'))); ?> onclick="var action = this.checked ? 'draft' : ''; jQuery('#gf_paytm_form_update_action').val(action);" />
+                            <label class="inline" for="gf_paytm_form_update_post"><?php esc_html_e('Update Post when subscription is cancelled.', 'paytm-gravity-forms'); ?></label>
+                            <select id="gf_paytm_form_update_action" name="gf_paytm_form_update_action" onchange="var checked = jQuery(this).val() ? 'checked' : false; jQuery('#gf_paytm_form_update_post').attr('checked', checked);">
+                                <option value=""></option>
+                                <option value="draft" <?php selected(rgar($config['meta'], 'update_post_action'), 'draft'); ?>><?php esc_html_e('Mark Post as Draft', 'paytm-gravity-forms'); ?></option>
+                                <option value="delete" <?php selected(rgar($config['meta'], 'update_post_action'), 'delete'); ?>><?php esc_html_e('Delete Post', 'paytm-gravity-forms'); ?></option>
+                            </select>
+                        </li>
+                        <?php do_action('gform_paytm_form_action_fields', $config, $form); ?>
+                    </ul>
                 </div>
-            </div> <!-- / paytm_form conditional -->
 
-            <div id="paytm_form_submit_container" class="margin_vertical_30">
-                <input type="submit" name="gf_paytm_form_submit" value="<?php echo empty($id) ? esc_attr_e("  Save  ", "paytm-gravity-forms") : esc_attr_e("Update", "paytm-gravity-forms"); ?>" class="button-primary"/>
-                <input type="button" value="<?php esc_attr_e("Cancel", "paytm-gravity-forms"); ?>" class="button" onclick="javascript:document.location='admin.php?page=gf_paytm_form'" />
+                <div class="paytm-feed-row margin_vertical_10" id="gf_paytm_form_notifications" <?php echo !isset($form['notifications']) ? "style='display:none;'" : ''; ?>>
+                    <div class="paytm-feed-label">
+                        <label class="left_header"><?php esc_html_e('Notifications', 'paytm-gravity-forms'); ?></label>
+                        <p class="paytm-feed-subtitle"><?php esc_html_e('Delay selected notifications until Paytm confirms a successful payment.', 'paytm-gravity-forms'); ?></p>
+                    </div>
+                    <div class="paytm-feed-row__control">
+                        <input type="checkbox" name="gf_paytm_form_delay_notifications" id="gf_paytm_form_delay_notifications" value="1" onclick="ToggleNotifications();" <?php checked(true, (bool) $has_delayed_notifications); ?> />
+                        <label class="inline" for="gf_paytm_form_delay_notifications"><?php esc_html_e('Send notifications only when payment is received.', 'paytm-gravity-forms'); ?></label>
+                        <ul id="gf_paytm_form_notification_container" style="padding-left:20px; <?php echo $has_delayed_notifications ? '' : 'display:none;'; ?>">
+                            <?php
+                            if (!empty($form) && is_array(rgar($form, 'notifications'))) {
+                                foreach ($form['notifications'] as $index => $notification) {
+                                    $notification_id = rgar($notification, 'id');
+                                    $checkbox_id = 'gf_paytm_form_selected_notifications_' . esc_attr($index);
+                                    ?>
+                                    <li class="gf_paytm_form_notification">
+                                        <input type="checkbox" name="gf_paytm_form_selected_notifications[]" id="<?php echo $checkbox_id; ?>" value="<?php echo esc_attr($notification_id); ?>" <?php checked(true, in_array($notification_id, $selected_notifications, true)); ?> />
+                                        <label class="inline" for="<?php echo $checkbox_id; ?>"><?php echo esc_html(rgar($notification, 'name')); ?></label>
+                                    </li>
+                                    <?php
+                                }
+                            }
+                            ?>
+                        </ul>
+                    </div>
+                </div>
+
+                <?php do_action('gform_paytm_form_add_option_group', $config, $form); ?>
+            </div>
+
+            <div class="paytm-feed-card">
+                <h3 class="paytm-feed-card__title"><?php esc_html_e('Conditional Logic', 'paytm-gravity-forms'); ?></h3>
+                <p class="paytm-feed-card__subtitle"><?php esc_html_e('Optionally send submissions to Paytm only when a condition is met.', 'paytm-gravity-forms'); ?></p>
+                <div id="gf_paytm_form_conditional_section" class="paytm-feed-row margin_vertical_10">
+                    <div class="paytm-feed-label">
+                        <label for="gf_paytm_form_conditional_enabled" class="left_header"><?php esc_html_e('Paytm Form Condition', 'paytm-gravity-forms'); ?></label>
+                        <p class="paytm-feed-subtitle"><?php esc_html_e('When enabled, only matching submissions are sent to Paytm. When disabled, all submissions use Paytm.', 'paytm-gravity-forms'); ?></p>
+                    </div>
+                    <div class="paytm-feed-row__control" id="gf_paytm_form_conditional_option">
+                        <input type="checkbox" id="gf_paytm_form_conditional_enabled" name="gf_paytm_form_conditional_enabled" value="1" onclick="if(this.checked){jQuery('#gf_paytm_form_conditional_container').fadeIn('fast');} else{ jQuery('#gf_paytm_form_conditional_container').fadeOut('fast'); }" <?php checked(!empty(rgar($config['meta'], 'paytm_form_conditional_enabled'))); ?>/>
+                        <label for="gf_paytm_form_conditional_enabled"><?php esc_html_e('Enable', 'paytm-gravity-forms'); ?></label>
+
+                        <div id="gf_paytm_form_conditional_container" <?php echo empty(rgar($config['meta'], 'paytm_form_conditional_enabled')) ? "style='display:none'" : ''; ?>>
+                            <div id="gf_paytm_form_conditional_fields" style="display:none">
+                                <?php esc_html_e('Send to Paytm Form if', 'paytm-gravity-forms'); ?>
+                                <select id="gf_paytm_form_conditional_field_id" name="gf_paytm_form_conditional_field_id" class="optin_select" onchange='jQuery("#gf_paytm_form_conditional_value_container").html(GetFieldValues(jQuery(this).val(), "", 20));'></select>
+                                <select id="gf_paytm_form_conditional_operator" name="gf_paytm_form_conditional_operator">
+                                    <option value="is" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), 'is'); ?>><?php esc_html_e('is', 'paytm-gravity-forms'); ?></option>
+                                    <option value="isnot" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), 'isnot'); ?>><?php esc_html_e('is not', 'paytm-gravity-forms'); ?></option>
+                                    <option value=">" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), '>'); ?>><?php esc_html_e('greater than', 'paytm-gravity-forms'); ?></option>
+                                    <option value="<" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), '<'); ?>><?php esc_html_e('less than', 'paytm-gravity-forms'); ?></option>
+                                    <option value="contains" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), 'contains'); ?>><?php esc_html_e('contains', 'paytm-gravity-forms'); ?></option>
+                                    <option value="starts_with" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), 'starts_with'); ?>><?php esc_html_e('starts with', 'paytm-gravity-forms'); ?></option>
+                                    <option value="ends_with" <?php selected(rgar($config['meta'], 'paytm_form_conditional_operator'), 'ends_with'); ?>><?php esc_html_e('ends with', 'paytm-gravity-forms'); ?></option>
+                                </select>
+                                <div id="gf_paytm_form_conditional_value_container" name="gf_paytm_form_conditional_value_container" style="display:inline;"></div>
+                            </div>
+                            <div id="gf_paytm_form_conditional_message" style="display:none">
+                                <?php esc_html_e('To create a registration condition, your form must have a field supported by conditional logic.', 'paytm-gravity-forms'); ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="paytm_form_submit_container" class="paytm-feed-card margin_vertical_30">
+                <input type="submit" name="gf_paytm_form_submit" value="<?php echo esc_attr($submit_label); ?>" class="button-primary"/>
+                <input type="button" value="<?php echo esc_attr__('Cancel', 'paytm-gravity-forms'); ?>" class="button" onclick="document.location='<?php echo esc_js($list_url); ?>'" />
             </div>
         </div>
     </form>
@@ -1556,292 +1915,253 @@ class GFPaytmForm {
 
 <script type="text/javascript">
     jQuery(document).ready(function(){
-        SetPeriodNumber('#gf_paytm_form_billing_cycle_number', jQuery("#gf_paytm_form_billing_cycle_type").val());
-        SetPeriodNumber('#gf_paytm_form_trial_period_number', jQuery("#gf_paytm_form_trial_period_type").val());
+        SetPeriodNumber('#gf_paytm_form_billing_cycle_number', jQuery('#gf_paytm_form_billing_cycle_type').val());
+        SetPeriodNumber('#gf_paytm_form_trial_period_number', jQuery('#gf_paytm_form_trial_period_type').val());
     });
 
     function SelectType(type){
-        jQuery("#paytm_form_field_group").slideUp();
+        jQuery('#paytm_form_field_group').slideUp();
+        jQuery('#paytm_form_field_group input[type="text"], #paytm_form_field_group select').val('');
+        jQuery('#gf_paytm_form_trial_period_type, #gf_paytm_form_billing_cycle_type').val('M');
+        jQuery('#paytm_form_field_group input:checked').attr('checked', false);
 
-        jQuery("#paytm_form_field_group input[type=\"text\"], #paytm_form_field_group select").val("");
-        jQuery("#gf_paytm_form_trial_period_type, #gf_paytm_form_billing_cycle_type").val("M");
-
-        jQuery("#paytm_form_field_group input:checked").attr("checked", false);
-
-        if(type){
-            jQuery("#paytm_form_form_container").slideDown();
-            jQuery("#gf_paytm_form_form").val("");
-        }
-        else{
-            jQuery("#paytm_form_form_container").slideUp();
+        if (type) {
+            jQuery('#paytm_form_form_container').slideDown();
+            jQuery('#gf_paytm_form_form').val('');
+        } else {
+            jQuery('#paytm_form_form_container').slideUp();
         }
     }
 
     function SelectForm(type, formId, settingId){
-        if(!formId){
-            jQuery("#paytm_form_field_group").slideUp();
+        if (!formId) {
+            jQuery('#paytm_form_field_group').slideUp();
             return;
         }
 
-        jQuery("#paytm_form_wait").show();
-        jQuery("#paytm_form_field_group").slideUp();
+        jQuery('#paytm_form_wait').show();
+        jQuery('#paytm_form_field_group').slideUp();
 
         var mysack = new sack(ajaxurl);
         mysack.execute = 1;
         mysack.method = 'POST';
-        mysack.setVar( "action", "gf_select_paytm_form_form" );
-        mysack.setVar( "gf_select_paytm_form_form", "<?php echo wp_create_nonce("gf_select_paytm_form_form") ?>" );
-        mysack.setVar( "type", type);
-        mysack.setVar( "form_id", formId);
-        mysack.setVar( "setting_id", settingId);
-        mysack.onError = function() {jQuery("#paytm_form_wait").hide(); alert('<?php esc_attr_e("Ajax error while selecting a form", "paytm-gravity-forms") ?>' )};
+        mysack.setVar('action', 'gf_select_paytm_form_form');
+        mysack.setVar('gf_select_paytm_form_form', '<?php echo esc_js(wp_create_nonce('gf_select_paytm_form_form')); ?>');
+        mysack.setVar('type', type);
+        mysack.setVar('form_id', formId);
+        mysack.setVar('setting_id', settingId);
+        mysack.onError = function() {
+            jQuery('#paytm_form_wait').hide();
+            alert('<?php echo esc_js(__('Ajax error while selecting a form', 'paytm-gravity-forms')); ?>');
+        };
         mysack.runAJAX();
 
         return true;
     }
 
     function EndSelectForm(form_meta, customer_fields, recurring_amount_options){
-
-        //setting global form object
         form = form_meta;
+        var type = jQuery('#gf_paytm_form_type').val();
 
-        var type = jQuery("#gf_paytm_form_type").val();
-
-        jQuery(".gf_paytm_form_invalid_form").hide();
-        if( (type == "product" || type =="subscription") && GetFieldsByType(["product"]).length == 0){
-            jQuery("#gf_paytm_form_invalid_product_form").show();
-            jQuery("#paytm_form_wait").hide();
+        jQuery('.gf_paytm_form_invalid_form').hide();
+        if ((type == 'product' || type == 'subscription') && GetFieldsByType(['product']).length == 0) {
+            jQuery('#gf_paytm_form_invalid_product_form').show();
+            jQuery('#paytm_form_wait').hide();
+            return;
+        } else if (type == 'donation' && GetFieldsByType(['product', 'donation']).length == 0) {
+            jQuery('#gf_paytm_form_invalid_donation_form').show();
+            jQuery('#paytm_form_wait').hide();
             return;
         }
-        else if(type == "donation" && GetFieldsByType(["product", "donation"]).length == 0){
-            jQuery("#gf_paytm_form_invalid_donation_form").show();
-            jQuery("#paytm_form_wait").hide();
-            return;
+
+        jQuery('.paytm_form_field_container').hide();
+        jQuery('#paytm_form_customer_fields').html(customer_fields);
+        jQuery('#gf_paytm_form_recurring_amount').html(recurring_amount_options);
+
+        var post_fields = GetFieldsByType(['post_title', 'post_content', 'post_excerpt', 'post_category', 'post_custom_field', 'post_image', 'post_tag']);
+        if (post_fields.length > 0) {
+            jQuery('#paytm_form_post_action').show();
+        } else {
+            jQuery('#gf_paytm_form_delay_post').attr('checked', false);
+            jQuery('#paytm_form_post_action').hide();
         }
 
-        jQuery(".paytm_form_field_container").hide();
-        jQuery("#paytm_form_customer_fields").html(customer_fields);
-        jQuery("#gf_paytm_form_recurring_amount").html(recurring_amount_options);
-
-        //displaying delayed post creation setting if current form has a post field
-        var post_fields = GetFieldsByType(["post_title", "post_content", "post_excerpt", "post_category", "post_custom_field", "post_image", "post_tag"]);
-        if(post_fields.length > 0){
-            jQuery("#paytm_form_post_action").show();
-        }
-        else{
-            jQuery("#gf_paytm_form_delay_post").attr("checked", false);
-            jQuery("#paytm_form_post_action").hide();
+        if (type == 'subscription' && post_fields.length > 0) {
+            jQuery('#paytm_form_post_update_action').show();
+        } else {
+            jQuery('#gf_paytm_form_update_post').attr('checked', false);
+            jQuery('#paytm_form_post_update_action').hide();
         }
 
-        if(type == "subscription" && post_fields.length > 0){
-            jQuery("#paytm_form_post_update_action").show();
-        }
-        else{
-            jQuery("#gf_paytm_form_update_post").attr("checked", false);
-            jQuery("#paytm_form_post_update_action").hide();
-        }
+        SetPeriodNumber('#gf_paytm_form_billing_cycle_number', jQuery('#gf_paytm_form_billing_cycle_type').val());
+        SetPeriodNumber('#gf_paytm_form_trial_period_number', jQuery('#gf_paytm_form_trial_period_type').val());
 
-        SetPeriodNumber('#gf_paytm_form_billing_cycle_number', jQuery("#gf_paytm_form_billing_cycle_type").val());
-        SetPeriodNumber('#gf_paytm_form_trial_period_number', jQuery("#gf_paytm_form_trial_period_type").val());
-
-        //Calling callback functions
         jQuery(document).trigger('paytm_formFormSelected', [form]);
 
-        jQuery("#gf_paytm_form_conditional_enabled").attr('checked', false);
-        SetPaytmFormCondition("","");
+        jQuery('#gf_paytm_form_conditional_enabled').attr('checked', false);
+        SetPaytmFormCondition('', '');
 
-        if(form["notifications"]){
-            jQuery("#gf_paytm_form_notifications").show();
-            jQuery("#paytm_form_delay_autoresponder, #paytm_form_delay_notification").hide();
-        }
-        else{
-            jQuery("#paytm_form_delay_autoresponder, #paytm_form_delay_notification").show();
-            jQuery("#gf_paytm_form_notifications").hide();
+        if (form['notifications']) {
+            jQuery('#gf_paytm_form_notifications').show();
+            jQuery('#paytm_form_delay_autoresponder, #paytm_form_delay_notification').hide();
+        } else {
+            jQuery('#paytm_form_delay_autoresponder, #paytm_form_delay_notification').show();
+            jQuery('#gf_paytm_form_notifications').hide();
         }
 
-        jQuery("#paytm_form_field_container_" + type).show();
-        jQuery("#paytm_form_field_group").slideDown();
-        jQuery("#paytm_form_wait").hide();
+        jQuery('#paytm_form_field_container_' + type).show();
+        jQuery('#paytm_form_field_group').slideDown();
+        jQuery('#paytm_form_wait').hide();
     }
 
     function SetPeriodNumber(element, type){
         var prev = jQuery(element).val();
-
         var min = 1;
         var max = 0;
-        switch(type){
-            case "D" :
-                max = 100;
-            break;
-            case "W" :
-                max = 52;
-            break;
-            case "M" :
-                max = 12;
-            break;
-            case "Y" :
-                max = 5;
-            break;
+        switch (type) {
+            case 'D': max = 100; break;
+            case 'W': max = 52; break;
+            case 'M': max = 12; break;
+            case 'Y': max = 5; break;
         }
-        var str="";
-        for(var i=min; i<=max; i++){
-            var selected = prev == i ? "selected='selected'" : "";
-            str += "<option value='" + i + "' " + selected + ">" + i + "</option>";
+        var str = '';
+        for (var i = min; i <= max; i++) {
+            var selected = prev == i ? "selected='selected'" : '';
+            str += "<option value='" + i + "' " + selected + '>' + i + '</option>';
         }
         jQuery(element).html(str);
     }
 
     function GetFieldsByType(types){
-        var fields = new Array();
-        for(var i=0; i<form["fields"].length; i++){
-            if(IndexOf(types, form["fields"][i]["type"]) >= 0)
-                fields.push(form["fields"][i]);
+        var fields = [];
+        if (!form || !form['fields']) {
+            return fields;
+        }
+        for (var i = 0; i < form['fields'].length; i++) {
+            if (IndexOf(types, form['fields'][i]['type']) >= 0) {
+                fields.push(form['fields'][i]);
+            }
         }
         return fields;
     }
 
     function IndexOf(ary, item){
-        for(var i=0; i<ary.length; i++)
-            if(ary[i] == item)
+        for (var i = 0; i < ary.length; i++) {
+            if (ary[i] == item) {
                 return i;
-
+            }
+        }
         return -1;
     }
-
 </script>
 
 <script type="text/javascript">
-
-    // Paytm Form Conditional Functions
-
-    <?php
-    if(!empty($config["form_id"])){
-        ?>
-
-        // initilize form object
-        form = <?php echo GFCommon::json_encode($form)?> ;
-
-        // initializing registration condition drop downs
+    <?php if (!empty($config['form_id'])) : ?>
+        form = <?php echo GFCommon::json_encode($form); ?>;
         jQuery(document).ready(function(){
-            var selectedField = "<?php echo str_replace('"', '\"', $config["meta"]["paytm_form_conditional_field_id"])?>";
-            var selectedValue = "<?php echo str_replace('"', '\"', $config["meta"]["paytm_form_conditional_value"])?>";
+            var selectedField = <?php echo wp_json_encode((string) rgar($config['meta'], 'paytm_form_conditional_field_id')); ?>;
+            var selectedValue = <?php echo wp_json_encode((string) rgar($config['meta'], 'paytm_form_conditional_value')); ?>;
             SetPaytmFormCondition(selectedField, selectedValue);
         });
-
-        <?php
-    }
-    ?>
+    <?php endif; ?>
 
     function SetPaytmFormCondition(selectedField, selectedValue){
+        jQuery('#gf_paytm_form_conditional_field_id').html(GetSelectableFields(selectedField, 20));
+        var optinConditionField = jQuery('#gf_paytm_form_conditional_field_id').val();
+        var checked = jQuery('#gf_paytm_form_conditional_enabled').attr('checked');
 
-        // load form fields
-        jQuery("#gf_paytm_form_conditional_field_id").html(GetSelectableFields(selectedField, 20));
-        var optinConditionField = jQuery("#gf_paytm_form_conditional_field_id").val();
-        var checked = jQuery("#gf_paytm_form_conditional_enabled").attr('checked');
-
-        if(optinConditionField){
-            jQuery("#gf_paytm_form_conditional_message").hide();
-            jQuery("#gf_paytm_form_conditional_fields").show();
-            jQuery("#gf_paytm_form_conditional_value_container").html(GetFieldValues(optinConditionField, selectedValue, 20));
-            jQuery("#gf_paytm_form_conditional_value").val(selectedValue);
-        }
-        else{
-            jQuery("#gf_paytm_form_conditional_message").show();
-            jQuery("#gf_paytm_form_conditional_fields").hide();
+        if (optinConditionField) {
+            jQuery('#gf_paytm_form_conditional_message').hide();
+            jQuery('#gf_paytm_form_conditional_fields').show();
+            jQuery('#gf_paytm_form_conditional_value_container').html(GetFieldValues(optinConditionField, selectedValue, 20));
+            jQuery('#gf_paytm_form_conditional_value').val(selectedValue);
+        } else {
+            jQuery('#gf_paytm_form_conditional_message').show();
+            jQuery('#gf_paytm_form_conditional_fields').hide();
         }
 
-        if(!checked) jQuery("#gf_paytm_form_conditional_container").hide();
-
+        if (!checked) {
+            jQuery('#gf_paytm_form_conditional_container').hide();
+        }
     }
 
     function GetFieldValues(fieldId, selectedValue, labelMaxCharacters){
-        if(!fieldId)
-            return "";
+        if (!fieldId) {
+            return '';
+        }
 
-        var str = "";
+        var str = '';
         var field = GetFieldById(fieldId);
-        if(!field)
-            return "";
+        if (!field) {
+            return '';
+        }
 
         var isAnySelected = false;
 
-        if(field["type"] == "post_category" && field["displayAllCategories"]){
-            str += '<?php $dd = wp_dropdown_categories(array("class"=>"optin_select", "orderby"=> "name", "id"=> "gf_paytm_form_conditional_value", "name"=> "gf_paytm_form_conditional_value", "hierarchical"=>true, "hide_empty"=>0, "echo"=>false)); echo str_replace("\n","", str_replace("'","\\'",$dd)); ?>';
-        }
-        else if(field.choices){
-            str += '<select id="gf_paytm_form_conditional_value" name="gf_paytm_form_conditional_value" class="optin_select">'
-
-
-            for(var i=0; i<field.choices.length; i++){
+        if (field['type'] == 'post_category' && field['displayAllCategories']) {
+            str += '<?php $dd = wp_dropdown_categories(array('class' => 'optin_select', 'orderby' => 'name', 'id' => 'gf_paytm_form_conditional_value', 'name' => 'gf_paytm_form_conditional_value', 'hierarchical' => true, 'hide_empty' => 0, 'echo' => false)); echo str_replace("\n", '', str_replace("'", "\\'", $dd)); ?>';
+        } else if (field.choices) {
+            str += '<select id="gf_paytm_form_conditional_value" name="gf_paytm_form_conditional_value" class="optin_select">';
+            for (var i = 0; i < field.choices.length; i++) {
                 var fieldValue = field.choices[i].value ? field.choices[i].value : field.choices[i].text;
                 var isSelected = fieldValue == selectedValue;
-                var selected = isSelected ? "selected='selected'" : "";
-                if(isSelected)
+                var selected = isSelected ? "selected='selected'" : '';
+                if (isSelected) {
                     isAnySelected = true;
-
-                str += "<option value='" + fieldValue.replace(/'/g, "&#039;") + "' " + selected + ">" + TruncateMiddle(field.choices[i].text, labelMaxCharacters) + "</option>";
+                }
+                str += "<option value='" + fieldValue.replace(/'/g, '&#039;') + "' " + selected + '>' + TruncateMiddle(field.choices[i].text, labelMaxCharacters) + '</option>';
             }
-
-            if(!isAnySelected && selectedValue){
-                str += "<option value='" + selectedValue.replace(/'/g, "&#039;") + "' selected='selected'>" + TruncateMiddle(selectedValue, labelMaxCharacters) + "</option>";
+            if (!isAnySelected && selectedValue) {
+                str += "<option value='" + selectedValue.replace(/'/g, '&#039;') + "' selected='selected'>" + TruncateMiddle(selectedValue, labelMaxCharacters) + '</option>';
             }
-            str += "</select>";
-        }
-        else
-        {
-            selectedValue = selectedValue ? selectedValue.replace(/'/g, "&#039;") : "";
-            //create a text field for fields that don't have choices (i.e text, textarea, number, email, etc...)
-            str += "<input type='text' placeholder='<?php esc_attr_e("Enter value", "paytm-gravity-forms"); ?>' id='gf_paytm_form_conditional_value' name='gf_paytm_form_conditional_value' value='" + selectedValue.replace(/'/g, "&#039;") + "'>";
+            str += '</select>';
+        } else {
+            selectedValue = selectedValue ? selectedValue.replace(/'/g, '&#039;') : '';
+            str += "<input type='text' placeholder='<?php echo esc_js(__('Enter value', 'paytm-gravity-forms')); ?>' id='gf_paytm_form_conditional_value' name='gf_paytm_form_conditional_value' value='" + selectedValue.replace(/'/g, '&#039;') + "'>";
         }
 
         return str;
     }
 
     function GetFieldById(fieldId){
-        for(var i=0; i<form.fields.length; i++){
-            if(form.fields[i].id == fieldId)
+        for (var i = 0; i < form.fields.length; i++) {
+            if (form.fields[i].id == fieldId) {
                 return form.fields[i];
+            }
         }
         return null;
     }
 
     function TruncateMiddle(text, maxCharacters){
-        if(!text)
-            return "";
-
-        if(text.length <= maxCharacters)
+        if (!text) {
+            return '';
+        }
+        if (text.length <= maxCharacters) {
             return text;
-        var middle = parseInt(maxCharacters / 2);
-        return text.substr(0, middle) + "..." + text.substr(text.length - middle, middle);
+        }
+        var middle = parseInt(maxCharacters / 2, 10);
+        return text.substr(0, middle) + '...' + text.substr(text.length - middle, middle);
     }
 
     function GetSelectableFields(selectedFieldId, labelMaxCharacters){
-        var str = "";
-        var inputType;
-        for(var i=0; i<form.fields.length; i++){
-            fieldLabel = form.fields[i].adminLabel ? form.fields[i].adminLabel : form.fields[i].label;
-            inputType = form.fields[i].inputType ? form.fields[i].inputType : form.fields[i].type;
+        var str = '';
+        for (var i = 0; i < form.fields.length; i++) {
+            var fieldLabel = form.fields[i].adminLabel ? form.fields[i].adminLabel : form.fields[i].label;
             if (IsConditionalLogicField(form.fields[i])) {
-                var selected = form.fields[i].id == selectedFieldId ? "selected='selected'" : "";
-                str += "<option value='" + form.fields[i].id + "' " + selected + ">" + TruncateMiddle(fieldLabel, labelMaxCharacters) + "</option>";
+                var selected = form.fields[i].id == selectedFieldId ? "selected='selected'" : '';
+                str += "<option value='" + form.fields[i].id + "' " + selected + '>' + TruncateMiddle(fieldLabel, labelMaxCharacters) + '</option>';
             }
         }
         return str;
     }
 
     function IsConditionalLogicField(field){
-        inputType = field.inputType ? field.inputType : field.type;
-        var supported_fields = ["checkbox", "radio", "select", "text", "website", "textarea", "email", "hidden", "number", "phone", "multiselect", "post_title", "post_tags", "post_custom_field", "post_content", "post_excerpt"];
-
-        var index = jQuery.inArray(inputType, supported_fields);
-
-        return index >= 0;
+        var inputType = field.inputType ? field.inputType : field.type;
+        var supported_fields = ['checkbox', 'radio', 'select', 'text', 'website', 'textarea', 'email', 'hidden', 'number', 'phone', 'multiselect', 'post_title', 'post_tags', 'post_custom_field', 'post_content', 'post_excerpt'];
+        return jQuery.inArray(inputType, supported_fields) >= 0;
     }
-
 </script>
-
         <?php
-
     }
 
     public static function select_paytm_form_form(){
@@ -1858,7 +2178,7 @@ class GFPaytmForm {
         $customer_fields = self::get_customer_information($form);
         $recurring_amount_fields = self::get_product_options($form, "");
 
-        die("EndSelectForm(" . GFCommon::json_encode($form) . ", '" . str_replace("'", "\'", $customer_fields) . "', '" . str_replace("'", "\'", $recurring_amount_fields) . "');");
+        die("EndSelectForm(" . GFCommon::json_encode($form) . ", " . GFCommon::json_encode($customer_fields) . ", " . GFCommon::json_encode($recurring_amount_fields) . ");");
     }
 
     public static function add_permissions(){
@@ -1867,12 +2187,21 @@ class GFPaytmForm {
         $wp_roles->add_cap("administrator", "paytm-gravity-forms_uninstall");
     }
 
+    private static function ensure_permissions(){
+        global $wp_roles;
+        if(!isset($wp_roles) || !$wp_roles->get_role("administrator"))
+            return;
+
+        if(!$wp_roles->get_role("administrator")->has_cap("paytm-gravity-forms"))
+            self::add_permissions();
+    }
+
     //Target of Member plugin filter. Provides the plugin with Gravity Forms lists of capabilities
     public static function members_get_capabilities( $caps ) {
         return array_merge($caps, array("paytm-gravity-forms", "paytm-gravity-forms_uninstall"));
     }
 
-    public static function get_active_config($form){
+    public static function get_active_config($form, $entry = null){
 
         require_once(GF_PAYTM_FORM_BASE_PATH . "/data.php");
 
@@ -1881,11 +2210,140 @@ class GFPaytmForm {
             return false;
 
         foreach($configs as $config){
-            if(self::has_paytm_form_condition($form, $config))
+            if(self::has_paytm_form_condition($form, $config, $entry))
                 return $config;
         }
 
         return false;
+    }
+
+    private static $confirmation_script_enqueued = false;
+
+    public static function enqueue_confirmation_script($form, $is_ajax = false) {
+        if (self::$confirmation_script_enqueued || empty($form['id'])) {
+            return;
+        }
+
+        if (!class_exists('GFPaytmFormData')) {
+            require_once(GF_PAYTM_FORM_BASE_PATH . '/data.php');
+        }
+
+        if (!GFPaytmFormData::get_feed_by_form($form['id'])) {
+            return;
+        }
+
+        self::$confirmation_script_enqueued = true;
+        wp_enqueue_script('jquery');
+
+        $script = "(function($){
+    function getPaytmWrap() {
+        var \$wraps = $('.paytm-gf-checkout-wrap');
+        if (\$wraps.length > 1) {
+            \$wraps.slice(0, -1).remove();
+        }
+        return $('.paytm-gf-checkout-wrap').last();
+    }
+
+    function loadPaytmScript(url, callback) {
+        if (window.Paytm && window.Paytm.CheckoutJS) {
+            callback();
+            return;
+        }
+        var existing = document.querySelector('script[data-paytm-checkout=\"1\"]');
+        if (existing) {
+            existing.addEventListener('load', callback);
+            return;
+        }
+        var script = document.createElement('script');
+        script.type = 'application/javascript';
+        script.crossOrigin = 'anonymous';
+        script.src = url;
+        script.setAttribute('data-paytm-checkout', '1');
+        script.onload = callback;
+        document.head.appendChild(script);
+    }
+
+    function initPaytmCheckout() {
+        var \$wrap = getPaytmWrap();
+        if (!\$wrap.length || \$wrap.data('paytm-inited')) {
+            return;
+        }
+
+        var checkoutUrl = \$wrap.data('checkout-url');
+        var orderId = \$wrap.data('order-id');
+        var txnToken = \$wrap.data('token');
+        var amount = \$wrap.data('amount');
+        var formId = \$wrap.data('form-id');
+        var initKey = 'paytmGfInit_' + formId + '_' + \$wrap.attr('id');
+
+        if (!checkoutUrl || !orderId || !txnToken) {
+            return;
+        }
+
+        if (window[initKey]) {
+            \$wrap.data('paytm-inited', true);
+            return;
+        }
+
+        window[initKey] = true;
+        \$wrap.data('paytm-inited', true);
+
+        loadPaytmScript(checkoutUrl, function() {
+            if (!window.Paytm || !window.Paytm.CheckoutJS) {
+                return;
+            }
+
+            var config = {
+                root: '',
+                flow: 'DEFAULT',
+                data: {
+                    orderId: orderId,
+                    token: txnToken,
+                    tokenType: 'TXN_TOKEN',
+                    amount: amount
+                },
+                integration: {
+                    platform: 'Wordpress GF',
+                    version: \$wrap.data('gf-version') || ''
+                },
+                handler: {
+                    notifyMerchant: function(eventName) {
+                        if (eventName === 'APP_CLOSED') {
+                            \$wrap.find('.paytm-pg-loader, .paytm-overlay').hide();
+                        }
+                    }
+                }
+            };
+
+            window.Paytm.CheckoutJS.onLoad(function() {
+                window.Paytm.CheckoutJS.init(config).then(function() {
+                    if (parseInt(\$wrap.data('auto-invoke'), 10) === 1) {
+                        window.Paytm.CheckoutJS.invoke();
+                        \$wrap.find('.paytm-pg-loader, .paytm-overlay').hide();
+                    }
+                }).catch(function(error) {
+                    console.log('Paytm checkout error:', error);
+                });
+            });
+
+            \$wrap.find('#invovkePayment').off('click.paytm').on('click.paytm', function(e) {
+                e.preventDefault();
+                window.Paytm.CheckoutJS.invoke();
+                return false;
+            });
+        });
+    }
+
+    function bootPaytmCheckout() {
+        getPaytmWrap();
+        initPaytmCheckout();
+    }
+
+    $(document).on('gform_confirmation_loaded', bootPaytmCheckout);
+    $(bootPaytmCheckout);
+})(jQuery);";
+
+        wp_add_inline_script('jquery', $script);
     }
 
     public static function send_to_paytm_form($confirmation, $form, $entry, $ajax){
@@ -1904,14 +2362,12 @@ class GFPaytmForm {
             $paytm_industry_type_id = rgar($settings,"paytm_industry_type_id");
             $paytm_custom_callback = rgar($settings,"paytm_custom_callback");
             $paytm_callback_url = rgar($settings,"paytm_callback_url");
-            $paytm_env = rgar($settings,"paytm_env");           
-            $config = GFPaytmFormData::get_feed_by_form($form["id"]);
+            $paytm_env = rgar($settings,"paytm_env");
+            $config = self::get_active_config($form, $entry);
 
       if(!$config){
-        self::log_debug("NOT sending to Paytm Form: No Paytm Form setup was located for form_id = {$form['id']}.");
+        self::log_debug("NOT sending to Paytm Form: No Paytm Form setup matching condition for form_id = {$form['id']}.");
         return $confirmation;
-            }else{
-        $config = $config[0]; //using first sagepayform feed (only one sagepayform feed per form is supported)
             }
 
             // updating entry meta with current feed id
@@ -2043,129 +2499,38 @@ class GFPaytmForm {
             $paytm_arg_array = array();
 
             $checkout_url = str_replace('MID',$paytm_mid, PaytmHelper::getPaytmURL(PaytmConstantsGF::CHECKOUT_JS_URL,$paytm_env));
+            $paytm_wrap_id = 'paytm-gf-wrap-' . absint($form['id']) . '-' . absint($entry['id']);
 
-            $confirmation = '<script type="application/javascript" crossorigin="anonymous" src="'.$checkout_url.'" "></script>
-                     
-                    <button type="button" class="button btn btn-info"   id="invovkePayment" >  Pay </button>
-                    <a class="button cancel btn btn-danger" href="#">Cancel</a>
+            $confirmation = '<div id="' . esc_attr($paytm_wrap_id) . '" class="paytm-gf-checkout-wrap"'
+                . ' data-form-id="' . esc_attr($form['id']) . '"'
+                . ' data-checkout-url="' . esc_attr($checkout_url) . '"'
+                . ' data-order-id="' . esc_attr($orderid) . '"'
+                . ' data-token="' . esc_attr($data['txnToken']) . '"'
+                . ' data-amount="' . esc_attr($paytmParams["body"]['txnAmount']['value']) . '"'
+                . ' data-gf-version="' . esc_attr(get_bloginfo('version') . '|2.1.0') . '"'
+                . ' data-auto-invoke="1">'
+                . '<button type="button" class="button btn btn-info" id="invovkePayment">Pay</button>'
+                . '<a class="button cancel btn btn-danger" href="#">Cancel</a>'
+                . '<div id="paytm-pg-spinner" class="paytm-pg-loader">'
+                . '<div class="bounce1"></div><div class="bounce2"></div><div class="bounce3"></div><div class="bounce4"></div><div class="bounce5"></div>'
+                . '</div>'
+                . '<div class="paytm-overlay paytm-pg-loader"></div>'
+                . '<style type="text/css">
+.btn-info { color: #fff; background-color: #5bc0de; border-color: #46b8da; }
+.btn-danger { color: #fff; background-color: #d9534f; border-color: #d43f3a; text-decoration: none; }
+.btn { display: inline-block; margin-bottom: 0; font-weight: 400; text-align: center; white-space: nowrap; vertical-align: middle; cursor: pointer; background-image: none; border: 1px solid transparent; padding: 6px 12px; font-size: 14px; line-height: 1.42857143; border-radius: 4px; user-select: none; }
+#paytm-pg-spinner { margin: 0 auto; width: 70px; text-align: center; z-index: 999999; position: relative; }
+#paytm-pg-spinner > div { width: 10px; height: 10px; background-color: #012b71; border-radius: 100%; display: inline-block; animation: sk-bouncedelay 1.4s infinite ease-in-out both; }
+#paytm-pg-spinner .bounce1 { animation-delay: -0.64s; }
+#paytm-pg-spinner .bounce2 { animation-delay: -0.48s; }
+#paytm-pg-spinner .bounce3 { animation-delay: -0.32s; }
+#paytm-pg-spinner .bounce4 { animation-delay: -0.16s; }
+#paytm-pg-spinner .bounce4, #paytm-pg-spinner .bounce5 { background-color: #48baf5; }
+@keyframes sk-bouncedelay { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+.paytm-overlay { width: 100%; position: fixed; top: 0; opacity: .4; height: 100%; background: #000; left: 0; z-index: 999999; }
+</style></div>';
 
-
-
-<div id="paytm-pg-spinner" class="paytm-pg-loader">
-  <div class="bounce1"></div>
-  <div class="bounce2"></div>
-  <div class="bounce3"></div>
-  <div class="bounce4"></div>
-  <div class="bounce5"></div>
-</div>
-<div class="paytm-overlay paytm-pg-loader"></div>
-<style type="text/css">
-.btn-info {
-    color: #fff;
-    background-color: #5bc0de;
-    border-color: #46b8da;
-}
-
-.btn-danger {
-    color: #fff;
-    background-color: #d9534f;
-    border-color: #d43f3a;
-    text-decoration: none;
-
-}
-
-.btn {
-    display: inline-block;
-    margin-bottom: 0;
-    font-weight: 400;
-    text-align: center;
-    white-space: nowrap;
-    vertical-align: middle;
-    -ms-touch-action: manipulation;
-    touch-action: manipulation;
-    cursor: pointer;
-    background-image: none;
-    border: 1px solid transparent;
-    padding: 6px 12px;
-    font-size: 14px;
-    line-height: 1.42857143;
-    border-radius: 4px;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-}
-#paytm-pg-spinner {margin: 0% auto 0;width: 70px;text-align: center;z-index: 999999;position: relative;}
-
-#paytm-pg-spinner > div {width: 10px;height: 10px;background-color: #012b71;border-radius: 100%;display: inline-block;-webkit-animation: sk-bouncedelay 1.4s infinite ease-in-out both;animation: sk-bouncedelay 1.4s infinite ease-in-out both;}
-
-#paytm-pg-spinner .bounce1 {-webkit-animation-delay: -0.64s;animation-delay: -0.64s;}
-
-#paytm-pg-spinner .bounce2 {-webkit-animation-delay: -0.48s;animation-delay: -0.48s;}
-#paytm-pg-spinner .bounce3 {-webkit-animation-delay: -0.32s;animation-delay: -0.32s;}
-
-#paytm-pg-spinner .bounce4 {-webkit-animation-delay: -0.16s;animation-delay: -0.16s;}
-#paytm-pg-spinner .bounce4, #paytm-pg-spinner .bounce5{background-color: #48baf5;} 
-@-webkit-keyframes sk-bouncedelay {0%, 80%, 100% { -webkit-transform: scale(0) }40% { -webkit-transform: scale(1.0) }}
-
-@keyframes sk-bouncedelay { 0%, 80%, 100% { -webkit-transform: scale(0);transform: scale(0); } 40% { 
-    -webkit-transform: scale(1.0); transform: scale(1.0);}}
-.paytm-overlay{width: 100%;position: fixed;top: 0px;opacity: .4;height: 100%;background: #000;margin-left: -53px;}
-
-</style>
-                 
-<script>    
-               
-                 
-                  
-                var config = {
-                    "root": "",
-                    "flow": "DEFAULT",
-                    "data": {
-                      "orderId": "'.$orderid.'", 
-                      "token": "'.$data['txnToken'].'", 
-                      "tokenType": "TXN_TOKEN",
-                      "amount": "'.$paytmParams["body"]['txnAmount']['value'].'"
-                    },
-                    "integration": {
-                      "platform": "Wordpress GF",
-                      "version": "'.get_bloginfo( 'version' ).'|2.1.0"
-                    },
-                    "handler": {
-                      "notifyMerchant": function(eventName,data){
-                        console.log("notifyMerchant handler function called");
-                        if(eventName=="APP_CLOSED")
-                        {
-                            jQuery(".loading-paytm").hide();
-                            jQuery("#paytm-pg-spinner").hide();
-                            jQuery(".paytm-overlay").hide();  
-                        }
-                      } 
-                    }
-                  };
-            
-                  if(window.Paytm && window.Paytm.CheckoutJS){
-                    
-                      window.Paytm.CheckoutJS.onLoad(function excecuteAfterCompleteLoad() {
-                        
-                          window.Paytm.CheckoutJS.init(config).then(function onSuccess() {
-                            
-                            window.Paytm.CheckoutJS.invoke();
-
-
-                            jQuery("#paytm-pg-spinner").hide();
-                            jQuery(".paytm-overlay").hide();
-
-
-                          }).catch(function onError(error){
-                              console.log("error => ",error);
-                          });
-                      });
-                  } 
-       
-jQuery(document).ready(function(){ jQuery("#invovkePayment").on("click",function(){ window.Paytm.CheckoutJS.invoke(); return false; }); });
-
-</script>';
+            self::enqueue_confirmation_script($form, $ajax);
         }
         
 RGFormsModel::add_note($entry["id"], $user_id, $user_name, sprintf(esc_attr_e("Payment has been initiated. Amount: %s. Transaction Id: %s", "paytm-gravity-forms"), GFCommon::to_money($paytmParams["body"]['txnAmount']['value'], $entry["currency"]), $orderid));        
@@ -2178,6 +2543,10 @@ return $confirmation;
 
 
      public static function set_payment_status($config, $entry, $status, $transaction_id, $parent_transaction_id, $amount){
+        if(!class_exists("GFPaytmFormData")){
+            require_once(GF_PAYTM_FORM_BASE_PATH . "/data.php");
+        }
+
         global $current_user;
         $user_id = 0;
         $user_name = "System";
@@ -2196,7 +2565,7 @@ return $confirmation;
                     
                     
                         self::log_debug("Entry is not already Success. Proceeding...");
-                        $entry["payment_status"] = "Success";
+                        $entry["payment_status"] = "Paid";
                         $entry["payment_amount"] = $amount;
                         $entry["payment_date"] = gmdate("y-m-d H:i:s");
                         $entry["transaction_id"] = $transaction_id;
@@ -2226,21 +2595,23 @@ return $confirmation;
 
             case "FAILED" :
             
-                
-                
-                $StatusDetail = $_POST['RESPMSG'];
+                $StatusDetail = isset($_POST['RESPMSG']) ? $_POST['RESPMSG'] : '';
                 
                 self::log_debug("Processed a Failed request.");
                 if($entry["payment_status"] != "Failed"){
                     if(empty($entry["transaction_type"])){
                         $entry["payment_status"] = "Failed";
                         self::log_debug("Setting entry as Failed.");
-                        RGFormsModel::update_lead($entry);
+                        if(class_exists('GFAPI')){
+                            GFAPI::update_entry_property($entry['id'], 'payment_status', 'Failed');
+                        }else{
+                            RGFormsModel::update_lead_property($entry['id'], 'payment_status', 'Failed');
+                        }
                     }
                     if(!empty($StatusDetail)){
-                        RGFormsModel::add_note($entry["id"], $user_id, $user_name, sprintf(esc_attr_e("Payment has Failed. %s Transaction Id: %s", "paytm-gravity-forms"), $StatusDetail, $transaction_id));
+                        RGFormsModel::add_note($entry["id"], $user_id, $user_name, sprintf(__("Payment has Failed. %s Transaction Id: %s", "paytm-gravity-forms"), $StatusDetail, $transaction_id));
                     }else{
-                        RGFormsModel::add_note($entry["id"], $user_id, $user_name, sprintf(esc_attr_e("Payment has Failed. Failed payments occur when they are made via your customer's bank account and could not be completed. Transaction Id: %s", "paytm-gravity-forms"), $transaction_id));
+                        RGFormsModel::add_note($entry["id"], $user_id, $user_name, sprintf(__("Payment has Failed. Failed payments occur when they are made via your customer's bank account and could not be completed. Transaction Id: %s", "paytm-gravity-forms"), $transaction_id));
                     }
                 }
 
@@ -2257,25 +2628,33 @@ return $confirmation;
     
 
     
-    public static function has_paytm_form_condition($form, $config) {
+    public static function has_paytm_form_condition($form, $config, $entry = null) {
 
         $config = $config["meta"];
 
         $operator = isset($config["paytm_form_conditional_operator"]) ? $config["paytm_form_conditional_operator"] : "";
-        $field = RGFormsModel::get_field($form, $config["paytm_form_conditional_field_id"]);
+        $field = RGFormsModel::get_field($form, rgar($config, "paytm_form_conditional_field_id"));
 
-        if(empty($field) || !$config["paytm_form_conditional_enabled"])
+        // Condition disabled or field unavailable: always send to Paytm.
+        if (empty($field) || empty($config["paytm_form_conditional_enabled"])) {
             return true;
+        }
 
-        // if conditional is enabled, but the field is hidden, ignore conditional
-        $is_visible = !RGFormsModel::is_field_hidden($form, $field, array());
+        if (!empty($entry) && is_array($entry)) {
+            $is_visible  = !RGFormsModel::is_field_hidden($form, $field, array(), $entry);
+            $field_value = RGFormsModel::get_lead_field_value($entry, $field);
+        } else {
+            // Fallback for hooks that run before a full entry object exists.
+            $is_visible  = !RGFormsModel::is_field_hidden($form, $field, array());
+            $field_value = RGFormsModel::get_field_value($field, array());
+        }
 
-        $field_value = RGFormsModel::get_field_value($field, array());
+        // If the condition field is hidden by GF conditional logic, do not send to Paytm.
+        if (!$is_visible) {
+            return false;
+        }
 
-        $is_value_match = RGFormsModel::is_value_match($field_value, $config["paytm_form_conditional_value"], $operator);
-        $go_to_paytm_form = $is_value_match && $is_visible;
-
-        return  $go_to_paytm_form;
+        return RGFormsModel::is_value_match($field_value, rgar($config, "paytm_form_conditional_value"), $operator);
     }
 
     public static function get_config($form_id){
@@ -2525,7 +2904,7 @@ return $confirmation;
         delete_option("gf_paytm_form_version");
 
         //Deactivating plugin
-        $plugin = GF_SAGEPAY_FORM_PLUGIN;
+        $plugin = GF_PAYTM_FORM_PLUGIN;
         deactivate_plugins($plugin);
         update_option('recently_activated', array($plugin => time()) + (array)get_option('recently_activated'));
     }
@@ -2545,12 +2924,16 @@ return $confirmation;
     }
 
     protected static function has_access($required_permission){
-        $has_members_plugin = function_exists('members_get_capabilities');
-        $has_access = $has_members_plugin ? current_user_can($required_permission) : current_user_can("level_7");
-        if($has_access)
-            return $has_members_plugin ? $required_permission : "level_7";
-        else
-            return false;
+        if(current_user_can("gform_full_access"))
+            return "gform_full_access";
+
+        if(current_user_can("gravityforms_edit_forms"))
+            return "gravityforms_edit_forms";
+
+        if(function_exists('members_get_capabilities') && current_user_can($required_permission))
+            return $required_permission;
+
+        return false;
     }
 
     private static function get_customer_information($form, $config=null){
@@ -2558,7 +2941,7 @@ return $confirmation;
         //getting list of all fields for the selected form
         $form_fields = self::get_form_fields($form);
 
-        $str = "<table cellpadding='0' cellspacing='0'><tr><td class='paytm_form_col_heading'>" . esc_attr_e("Paytm Form Fields", "paytm-gravity-forms") . "</td><td class='paytm_form_col_heading'>" . esc_attr_e("Form Fields", "paytm-gravity-forms") . "</td></tr>";
+        $str = "<table cellpadding='0' cellspacing='0'><tr><td class='paytm_form_col_heading'>" . esc_attr__("Paytm Form Fields", "paytm-gravity-forms") . "</td><td class='paytm_form_col_heading'>" . esc_attr__("Form Fields", "paytm-gravity-forms") . "</td></tr>";
         $customer_fields = self::get_customer_fields();
         foreach($customer_fields as $field){
             $selected_field = $config ? $config["meta"]["customer_fields"][$field["name"]] : "";
@@ -2594,7 +2977,7 @@ return $confirmation;
     }
 
     private static function get_product_options($form, $selected_field){
-        $str = "<option value=''>" . esc_attr_e("Select a field", "paytm-gravity-forms") ."</option>";
+        $str = "<option value=''>" . esc_attr__("Select a field", "paytm-gravity-forms") ."</option>";
         $fields = GFCommon::get_fields_by_type($form, array("product"));
 
         foreach($fields as $field){
@@ -2606,7 +2989,7 @@ return $confirmation;
         }
 
         $selected = $selected_field == 'all' ? "selected='selected'" : "";
-        $str .= "<option value='all' " . $selected . ">" . esc_attr_e("Form Total", "paytm-gravity-forms") ."</option>";
+        $str .= "<option value='all' " . $selected . ">" . esc_attr__("Form Total", "paytm-gravity-forms") ."</option>";
 
         return $str;
     }
@@ -2656,6 +3039,91 @@ return $confirmation;
         return in_array($current_page, array("gf_paytm_form"));
     }
 
+    private static function is_paytm_payment_gateway($payment_gateway) {
+        return in_array($payment_gateway, array('paytmform', 'paytm_form'), true);
+    }
+
+    public static function save_callback_response($entry_id, $post_data) {
+        $entry_id = absint($entry_id);
+        if (!$entry_id || empty($post_data) || !is_array($post_data)) {
+            return;
+        }
+
+        $sanitized = array();
+        foreach ($post_data as $key => $value) {
+            if (is_array($value) || is_object($value)) {
+                continue;
+            }
+            $sanitized[sanitize_key($key)] = sanitize_text_field((string) $value);
+        }
+
+        if (!empty($sanitized)) {
+            gform_update_meta($entry_id, 'paytm_callback_response', $sanitized);
+            gform_update_meta($entry_id, 'paytm_callback_received_at', current_time('mysql'));
+        }
+    }
+
+    public static function get_callback_response($entry_id) {
+        $callback_data = gform_get_meta($entry_id, 'paytm_callback_response');
+        return is_array($callback_data) ? $callback_data : array();
+    }
+
+    public static function render_paytm_callback_details_table($entry_id) {
+        $entry_id = absint($entry_id);
+        static $rendered_entries = array();
+
+        if (!$entry_id || !empty($rendered_entries[$entry_id])) {
+            return;
+        }
+
+        $rendered_entries[$entry_id] = true;
+        $callback_data = self::get_callback_response($entry_id);
+        if (empty($callback_data)) {
+            echo '<p>' . esc_html__('No Paytm callback data received yet.', 'paytm-gravity-forms') . '</p>';
+            return;
+        }
+
+        $received_at = gform_get_meta($entry_id, 'paytm_callback_received_at');
+        ksort($callback_data);
+        ?>
+        <h4 style="margin:0 0 10px;"><?php esc_html_e('Paytm Callback Response', 'paytm-gravity-forms'); ?></h4>
+        <?php if (!empty($received_at)) : ?>
+            <p style="margin:0 0 10px;"><strong><?php esc_html_e('Received At', 'paytm-gravity-forms'); ?>:</strong> <?php echo esc_html($received_at); ?></p>
+        <?php endif; ?>
+        <table class="widefat striped paytm-callback-response-table">
+            <thead>
+                <tr>
+                    <th scope="col"><?php esc_html_e('Field', 'paytm-gravity-forms'); ?></th>
+                    <th scope="col"><?php esc_html_e('Value', 'paytm-gravity-forms'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($callback_data as $key => $value) : ?>
+                    <tr>
+                        <th scope="row"><?php echo esc_html(strtoupper($key)); ?></th>
+                        <td style="word-break:break-word;"><?php echo esc_html($value); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php
+    }
+
+    public static function admin_display_paytm_callback_details($form, $lead) {
+        if (empty($lead['id'])) {
+            return;
+        }
+
+        $payment_gateway = gform_get_meta($lead['id'], 'payment_gateway');
+        if (!self::is_paytm_payment_gateway($payment_gateway)) {
+            return;
+        }
+
+        echo '<div class="paytm-callback-details-wrap" style="margin:12px 0;">';
+        self::render_paytm_callback_details_table($lead['id']);
+        echo '</div>';
+    }
+
     public static function admin_edit_payment_status($payment_status, $form_id, $lead)
     {
         //allow the payment status to be edited when for paytm_form, not set to Approved, and not a subscription
@@ -2665,7 +3133,7 @@ return $confirmation;
         $paytm_form_feed_id = gform_get_meta($lead["id"], "paytm_form_feed_id");
         $feed_config = GFPaytmFormData::get_feed($paytm_form_feed_id);
         $transaction_type = rgars($feed_config, "meta/type");
-        if ($payment_gateway <> "paytm_form" || strtolower(rgpost("save")) <> "edit" || $payment_status == "Approved" || $transaction_type == "subscription")
+        if (!self::is_paytm_payment_gateway($payment_gateway) || strtolower(rgpost("save")) <> "edit" || $payment_status == "Approved" || $transaction_type == "subscription")
             return $payment_status;
 
         //create drop down for payment status
@@ -2678,11 +3146,21 @@ return $confirmation;
     }
     public static function admin_edit_payment_status_details($form_id, $lead)
     {
-        //check meta to see if this entry is paytm_form
         $payment_gateway = gform_get_meta($lead["id"], "payment_gateway");
-        $form_action = strtolower(rgpost("save"));
-        if ($payment_gateway <> "paytm_form" || $form_action <> "edit")
+        if (!self::is_paytm_payment_gateway($payment_gateway)) {
             return;
+        }
+
+        ?>
+<div id="paytm_callback_response_details" style="display:block; margin-bottom:20px;">
+        <?php self::render_paytm_callback_details_table($lead['id']); ?>
+</div>
+        <?php
+
+        $form_action = strtolower(rgpost("save"));
+        if ($form_action !== "edit") {
+            return;
+        }
 
         //get data from entry to pre-populate fields
         $payment_amount = rgar($lead, "payment_amount");
@@ -2730,7 +3208,7 @@ return $confirmation;
         //check meta to see if this entry is paytm_form
         $payment_gateway = gform_get_meta($lead_id, "payment_gateway");
         $form_action = strtolower(rgpost("save"));
-        if ($payment_gateway <> "paytm_form" || $form_action <> "update")
+        if (!self::is_paytm_payment_gateway($payment_gateway) || $form_action <> "update")
             return;
         //get lead
         $lead = RGFormsModel::get_lead($lead_id);
@@ -2786,7 +3264,7 @@ return $confirmation;
         return $plugins;
     }
 
-    private static function log_error($message){
+    public static function log_error($message){
         if(class_exists("GFLogging"))
         {
             GFLogging::include_logger();
@@ -2859,88 +3337,5 @@ function rgblank($text){
     return empty($text) && strval($text) != "0";
 }
 }
-
-
-
-/*
-* Code to test Curl
-*/
-if(isset($_GET['paytm_action']) && $_GET['paytm_action'] == "curltest"){
-    add_action('the_content', 'curltest');
-}
-
-function curltest($content){
-
-    // phpinfo();exit;
-    $debug = array();
-
-    if(!function_exists("curl_init")){
-        $debug[0]["info"][] = "cURL extension is either not available or disabled. Check phpinfo for more info.";
-
-    // if curl is enable then see if outgoing URLs are blocked or not
-    } else {
-
-        // if any specific URL passed to test for
-        if(isset($_GET["url"]) && $_GET["url"] != ""){
-            $testing_urls = array($_GET["url"]);   
-        
-        } else {
-
-            // this site homepage URL
-            $server = get_site_url();
-
-            $settings = get_option("gf_paytm_form_settings");
-
-            $testing_urls = array(
-                                            $server,
-                                            "www.google.co.in",
-                                            $settings["paytm_transaction_status_url"]
-                                        );
-        }
-
-        // loop over all URLs, maintain debug log for each response received
-        foreach($testing_urls as $key=>$url){
-
-            $debug[$key]["info"][] = "Connecting to <b>" . $url . "</b> using cURL";
-
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-            $res = curl_exec($ch);
-
-            if (!curl_errno($ch)) {
-                $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                $debug[$key]["info"][] = "cURL executed succcessfully.";
-                $debug[$key]["info"][] = "HTTP Response Code: <b>". $http_code . "</b>";
-
-                // $debug[$key]["content"] = $res;
-
-            } else {
-                $debug[$key]["info"][] = "Connection Failed !!";
-                $debug[$key]["info"][] = "Error Code: <b>" . curl_errno($ch) . "</b>";
-                $debug[$key]["info"][] = "Error: <b>" . curl_error($ch) . "</b>";
-                break;
-            }
-
-            curl_close($ch);
-        }
-    }
-
-    $content = "<center><h1>cURL Test for Paytm Plugin</h1></center><hr/>";
-    foreach($debug as $k=>$v){
-        $content .= "<ul>";
-        foreach($v["info"] as $info){
-            $content .= "<li>".$info."</li>";
-        }
-        $content .= "</ul>";
-
-        // echo "<div style='display:none;'>" . $v["content"] . "</div>";
-        $content .= "<hr/>";
-    }
-
-    return $content;
-}
-/*
-* Code to test Curl
-*/
 
 ?>

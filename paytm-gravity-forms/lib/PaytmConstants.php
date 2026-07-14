@@ -18,14 +18,14 @@ class PaytmConstantsGF{
 	CONST APPEND_TIMESTAMP						= true;
 	CONST ORDER_PREFIX							= "";
 	CONST X_REQUEST_ID							= "PLUGIN_GRAVITY_FORM_";
-	CONST PLUGIN_DOC_URL						= "https://developer.paytm.com/docs/";
+	CONST PLUGIN_DOC_URL						= "https://paytmpayments.com/docs/";
 
 	CONST MAX_RETRY_COUNT						= 3;
 	CONST CONNECT_TIMEOUT						= 10;
 	CONST TIMEOUT								= 10;
 
-	CONST LAST_UPDATED							= "20233008";
-	CONST PLUGIN_VERSION						= "2.2";
+	CONST LAST_UPDATED							= "20260714";
+	CONST PLUGIN_VERSION						= "3.0";
 
 	CONST CUSTOM_CALLBACK_URL					= "";
 
