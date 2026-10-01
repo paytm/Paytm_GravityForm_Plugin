@@ -81,7 +81,7 @@ class GFPaytmFormData{
         $sql = $wpdb->prepare(" SELECT t.transaction_type, sum(t.amount) revenue, count(t.id) transactions
                                  FROM {$transaction_table_name} t
                                  INNER JOIN {$lead_table_name} l ON l.id = t.entry_id
-                                 WHERE l.form_id={$form_id}
+                                 WHERE l.form_id = %d
                                  GROUP BY t.transaction_type", $form_id);
 
         $results = $wpdb->get_results($sql, ARRAY_A);

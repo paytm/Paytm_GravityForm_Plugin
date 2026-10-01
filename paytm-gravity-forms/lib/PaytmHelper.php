@@ -73,11 +73,18 @@ class PaytmHelper{
         $jsonResponse = wp_remote_post($apiURL, array(
             'headers'     => array("Content-Type"=> "application/json"),
             'body'        => json_encode($requestParamList, JSON_UNESCAPED_SLASHES),
+            'timeout'     => PaytmConstantsGF::TIMEOUT,
         ));
 
-        //$response_code = wp_remote_retrieve_response_code( $jsonResponse );
+        if (is_wp_error($jsonResponse)) {
+            return array();
+        }
+
         $response_body = wp_remote_retrieve_body( $jsonResponse );
         $responseParamList = json_decode($response_body, true);
+        if (!is_array($responseParamList)) {
+            return array();
+        }
         $responseParamList['request'] = $requestParamList;
         return $responseParamList;
     }

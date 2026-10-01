@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Paytm Gravity Forms Payment
  * Description: Integrates Gravity Forms with Paytm Form, enabling end users to purchase goods and services through Gravity Forms.
- * Version: 3.0.0
+ * Version: 3.1.0
  * Author: Paytm
  * Requires at least: 3.5
  * Tags: Paytm, Paytm Payments, PayWithPaytm, Paytm Gravity Forms, Paytm Payment Gateway
@@ -72,32 +72,32 @@ function maybe_thankyou_page(){
                         return;
                     }
                         $settings = get_option("gf_paytm_form_settings");
-                        
-                        // GFPaytmForm::log_debug("Form {$entry["form_id"]} is properly configured.");
-                        $resp_code = isset($_POST['RESPCODE']) ? $_POST['RESPCODE'] : '';
-                        if($resp_code == "01"){
-                            $payment_status = "SUCCESS";
-                        }else{
-                            $payment_status = "FAILED";
-                        }
-                        /* echo "payment_status: " . $payment_status; */
+
+                        $order_id = isset($_POST['ORDERID']) ? sanitize_text_field(wp_unslash($_POST['ORDERID'])) : '';
+                        $status_check = GFPaytmForm::confirm_paytm_transaction($entry, $config, $order_id);
+
                         $cancel = apply_filters("gform_paytm_form_pre_ipn", false, $_POST, $entry, $config);
-                        
-                        if(!$cancel) {
-                            
-                        $objGravity->log_debug("Setting payment status...");
-                        $order_id = isset($_POST['ORDERID']) ? $_POST['ORDERID'] : '';
-                        $txn_amount = isset($_POST['TXNAMOUNT']) ? $_POST['TXNAMOUNT'] : 0;
-                        $objGravity->set_payment_status($config, $entry, $payment_status, $order_id, null, $txn_amount );
+
+                        if($cancel) {
+                            $objGravity->log_debug("IPN processing cancelled by the gform_paytm_form_pre_ipn filter. Aborting.");
+                        }
+                        else if(!empty($status_check['confirmed'])) {
+                            $objGravity->log_debug("Paytm transaction status confirmed. Setting payment status...");
+                            $objGravity->set_payment_status($config, $entry, "SUCCESS", $order_id, null, $status_check['amount']);
+                        }
+                        else if(!empty($status_check['failed'])) {
+                            $objGravity->log_debug("Paytm transaction status is not successful. " . $status_check['message']);
+                            $objGravity->set_payment_status($config, $entry, "FAILED", $order_id, null, $status_check['amount']);
                         }
                         else{
-                        $objGravity->log_debug("IPN processing cancelled by the gform_paytm_form_pre_ipn filter. Aborting.");
+                            $objGravity->log_debug("Paytm payment was not confirmed. " . $status_check['message']);
                         }
 
                         $return_page_id = rgar($settings, 'paytm_return_page');
                         $redirect_url = $return_page_id ? get_permalink($return_page_id) : home_url('/');
-                        $is_success = (isset($_POST['STATUS']) && $_POST['STATUS'] === 'TXN_SUCCESS');
-                        $redirect_url = paytm_build_return_redirect_url($redirect_url, $callback_post, $is_success);
+                        $is_success = !$cancel && !empty($status_check['confirmed']);
+                        $redirect_message = $is_success ? '' : $status_check['message'];
+                        $redirect_url = paytm_build_return_redirect_url($redirect_url, $callback_post, $is_success, $redirect_message);
                         wp_redirect($redirect_url);
                         exit;   
                             
@@ -333,7 +333,7 @@ class GFPaytmForm {
     private static $path = GF_PAYTM_FORM_PLUGIN;
     private static $url = "https://www.paytmpayments.com";
     private static $slug = "paytm-gravity-forms";
-    private static $version = "3.0.0";
+    private static $version = "3.1.0";
     private static $min_gravityforms_version = "1.6.4";
     private static $supported_fields = array("checkbox", "radio", "select", "text", "website", "textarea", "email", "hidden", "number", "phone", "multiselect", "post_title", "post_tags", "post_custom_field", "post_content", "post_excerpt");
 
@@ -886,7 +886,13 @@ class GFPaytmForm {
     }
 
     public static function load_notifications(){
-        $form_id = $_POST["form_id"];
+        check_ajax_referer('gf_paytm_form_load_notifications', 'gf_paytm_form_load_notifications');
+
+        if (!self::has_access('paytm-gravity-forms')) {
+            wp_die(-1, '', array('response' => 403));
+        }
+
+        $form_id = isset($_POST['form_id']) ? absint(wp_unslash($_POST['form_id'])) : 0;
         $form = RGFormsModel::get_form_meta($form_id);
         $notifications = array();
         if(is_array(rgar($form, "notifications"))){
@@ -1153,14 +1159,15 @@ class GFPaytmForm {
         global $wpdb;
 
         $tz_offset = self::get_mysql_tz_offset();
+        $form_id = isset($config["form_id"]) ? absint($config["form_id"]) : 0;
 
-        $results = $wpdb->get_results("SELECT CONVERT_TZ(t.date_created, '+00:00', '" . $tz_offset . "') as date, sum(t.amount) as amount_sold, sum(is_renewal) as renewals, sum(is_renewal=0) as new_sales
+        $results = $wpdb->get_results($wpdb->prepare("SELECT CONVERT_TZ(t.date_created, '+00:00', %s) as date, sum(t.amount) as amount_sold, sum(is_renewal) as renewals, sum(is_renewal=0) as new_sales
                                         FROM {$wpdb->prefix}rg_lead l
                                         INNER JOIN {$wpdb->prefix}rg_paytm_form_transaction t ON l.id = t.entry_id
-                                        WHERE form_id={$config["form_id"]} AND t.transaction_type='payment'
+                                        WHERE form_id=%d AND t.transaction_type='payment'
                                         GROUP BY date(date)
                                         ORDER BY payment_date desc
-                                        LIMIT 30");
+                                        LIMIT 30", $tz_offset, $form_id));
 
         $sales_today = 0;
         $revenue_today = 0;
@@ -1218,14 +1225,15 @@ class GFPaytmForm {
             global $wpdb;
 
             $tz_offset = self::get_mysql_tz_offset();
+            $form_id = isset($config["form_id"]) ? absint($config["form_id"]) : 0;
 
-            $results = $wpdb->get_results("SELECT yearweek(CONVERT_TZ(t.date_created, '+00:00', '" . $tz_offset . "')) week_number, sum(t.amount) as amount_sold, sum(is_renewal) as renewals, sum(is_renewal=0) as new_sales
+            $results = $wpdb->get_results($wpdb->prepare("SELECT yearweek(CONVERT_TZ(t.date_created, '+00:00', %s)) week_number, sum(t.amount) as amount_sold, sum(is_renewal) as renewals, sum(is_renewal=0) as new_sales
                                             FROM {$wpdb->prefix}rg_lead l
                                             INNER JOIN {$wpdb->prefix}rg_paytm_form_transaction t ON l.id = t.entry_id
-                                            WHERE form_id={$config["form_id"]} AND t.transaction_type='payment'
+                                            WHERE form_id=%d AND t.transaction_type='payment'
                                             GROUP BY week_number
                                             ORDER BY week_number desc
-                                            LIMIT 30");
+                                            LIMIT 30", $tz_offset, $form_id));
             $sales_week = 0;
             $revenue_week = 0;
             $tooltips = "";
@@ -1278,14 +1286,15 @@ class GFPaytmForm {
     private static function monthly_chart_info($config){
             global $wpdb;
             $tz_offset = self::get_mysql_tz_offset();
+            $form_id = isset($config["form_id"]) ? absint($config["form_id"]) : 0;
 
-            $results = $wpdb->get_results("SELECT date_format(CONVERT_TZ(t.date_created, '+00:00', '" . $tz_offset . "'), '%Y-%m-02') date, sum(t.amount) as amount_sold, sum(is_renewal) as renewals, sum(is_renewal=0) as new_sales
+            $results = $wpdb->get_results($wpdb->prepare("SELECT date_format(CONVERT_TZ(t.date_created, '+00:00', %s), '%%Y-%%m-02') date, sum(t.amount) as amount_sold, sum(is_renewal) as renewals, sum(is_renewal=0) as new_sales
                                             FROM {$wpdb->prefix}rg_lead l
                                             INNER JOIN {$wpdb->prefix}rg_paytm_form_transaction t ON l.id = t.entry_id
-                                            WHERE form_id={$config["form_id"]} AND t.transaction_type='payment'
+                                            WHERE form_id=%d AND t.transaction_type='payment'
                                             group by date
                                             order by date desc
-                                            LIMIT 30");
+                                            LIMIT 30", $tz_offset, $form_id));
 
             $sales_month = 0;
             $revenue_month = 0;
@@ -1688,6 +1697,7 @@ class GFPaytmForm {
                 container.html("<li><img src='<?php echo esc_url($loading_img); ?>' title='<?php echo esc_js(__('Please wait...', 'paytm-gravity-forms')); ?>' alt=''/></li>");
                 jQuery.post(ajaxurl, {
                     action: 'gf_paytm_form_load_notifications',
+                    gf_paytm_form_load_notifications: '<?php echo esc_js(wp_create_nonce('gf_paytm_form_load_notifications')); ?>',
                     form_id: form['id']
                 }, function(response) {
                     var notifications = jQuery.parseJSON(response);
@@ -2449,6 +2459,9 @@ class GFPaytmForm {
                     "custId" => $cust_id,
                 ),
         );
+
+        gform_update_meta($entry["id"], "paytm_order_id", $orderid);
+        gform_update_meta($entry["id"], "paytm_initiated_amount", $paytmParams["body"]["txnAmount"]["value"]);
             
         $checksum = PaytmChecksum::generateSignature(json_encode($paytmParams["body"], JSON_UNESCAPED_SLASHES), $paytm_key); 
             
@@ -2541,6 +2554,135 @@ return $confirmation;
 
 
 
+
+    public static function fetch_paytm_transaction_status($order_id){
+        $order_id = sanitize_text_field((string) $order_id);
+        if ($order_id === '') {
+            return array();
+        }
+
+        $settings = get_option("gf_paytm_form_settings");
+        $paytm_mid = (string) rgar($settings, "paytm_mid");
+        $paytm_key = (string) rgar($settings, "paytm_key");
+        $paytm_env = rgar($settings, "paytm_env");
+
+        if ($paytm_mid === '' || $paytm_key === '') {
+            return array();
+        }
+
+        $request = array(
+            "MID" => $paytm_mid,
+            "ORDERID" => $order_id,
+        );
+        $request["CHECKSUMHASH"] = PaytmChecksum::generateSignature($request, $paytm_key);
+
+        $url = PaytmHelper::getTransactionStatusURL($paytm_env);
+        $response = PaytmHelper::executecUrl($url, $request);
+
+        return is_array($response) ? $response : array();
+    }
+
+    public static function confirm_paytm_transaction($entry, $config, $order_id){
+        $result = array(
+            'confirmed' => false,
+            'failed' => false,
+            'amount' => 0,
+            'message' => __('Payment could not be verified. Please try again.', 'paytm-gravity-forms'),
+        );
+
+        $order_id = sanitize_text_field((string) $order_id);
+        if ($order_id === '' || empty($entry['id'])) {
+            $result['message'] = __('Security error! Invalid payment response.', 'paytm-gravity-forms');
+            return $result;
+        }
+
+        $stored_order_id = (string) gform_get_meta($entry['id'], 'paytm_order_id');
+        if ($stored_order_id !== '' && !hash_equals($stored_order_id, $order_id)) {
+            self::log_error('Paytm callback order id does not match the initiated order. Entry ID: ' . absint($entry['id']));
+            $result['message'] = __('Security error! Invalid payment response.', 'paytm-gravity-forms');
+            return $result;
+        }
+
+        $status = self::fetch_paytm_transaction_status($order_id);
+        $result_status = isset($status['STATUS']) ? (string) $status['STATUS'] : '';
+        $result_code = isset($status['RESPCODE']) ? (string) $status['RESPCODE'] : '';
+        $api_order_id = isset($status['ORDERID']) ? (string) $status['ORDERID'] : '';
+        $api_mid = isset($status['MID']) ? (string) $status['MID'] : '';
+        $api_amount = isset($status['TXNAMOUNT']) ? $status['TXNAMOUNT'] : 0;
+
+        self::log_debug('Paytm transaction status for entry ' . absint($entry['id']) . ': ' . $result_status . ' / ' . $result_code);
+
+        if ($result_status === '') {
+            $result['message'] = __('Payment could not be verified with Paytm. Please try again.', 'paytm-gravity-forms');
+            return $result;
+        }
+
+        if ($api_order_id === '' || !hash_equals($order_id, $api_order_id)) {
+            self::log_error('Paytm status order id mismatch. Entry ID: ' . absint($entry['id']));
+            $result['message'] = __('Security error! Invalid payment response.', 'paytm-gravity-forms');
+            return $result;
+        }
+
+        $settings = get_option('gf_paytm_form_settings');
+        $merchant_mid = (string) rgar($settings, 'paytm_mid');
+        if ($api_mid !== '' && $merchant_mid !== '' && !hash_equals($merchant_mid, $api_mid)) {
+            self::log_error('Paytm status merchant id mismatch. Entry ID: ' . absint($entry['id']));
+            $result['message'] = __('Security error! Invalid payment response.', 'paytm-gravity-forms');
+            return $result;
+        }
+
+        $result['amount'] = $api_amount;
+
+        if ($result_status === 'TXN_SUCCESS' && $result_code === '01') {
+            $expected = self::get_expected_payment_amount($config, $entry);
+            if (!self::payment_amount_covers($api_amount, $expected)) {
+                self::log_error('Paytm amount mismatch for entry ' . absint($entry['id']) . '. Paid ' . $api_amount . ', expected ' . $expected);
+                $result['message'] = __('Security error! Amount mismatched.', 'paytm-gravity-forms');
+                return $result;
+            }
+
+            $result['confirmed'] = true;
+            $result['message'] = '';
+            return $result;
+        }
+
+        if ($result_status === 'TXN_FAILURE') {
+            $result['failed'] = true;
+            $result['message'] = __('Payment failed. Please try again.', 'paytm-gravity-forms');
+            return $result;
+        }
+
+        $result['message'] = __('Payment is pending confirmation from Paytm.', 'paytm-gravity-forms');
+        return $result;
+    }
+
+    private static function get_expected_payment_amount($config, $entry){
+        $stored_amount = gform_get_meta($entry['id'], 'paytm_initiated_amount');
+        $has_stored_amount = ($stored_amount !== '' && $stored_amount !== null && $stored_amount !== false && is_numeric($stored_amount));
+        $initiated_amount = $has_stored_amount ? (float) $stored_amount : 0;
+
+        $form = RGFormsModel::get_form_meta($entry['form_id']);
+        $order_total = (is_array($form) && class_exists('GFCommon')) ? (float) GFCommon::get_order_total($form, $entry) : 0;
+        $feed_type = rgars($config, 'meta/type');
+
+        if ($feed_type === 'donation') {
+            return $has_stored_amount ? $initiated_amount : $order_total;
+        }
+
+        if ($order_total > 0) {
+            return ($has_stored_amount && $initiated_amount > $order_total) ? $initiated_amount : $order_total;
+        }
+
+        return $initiated_amount;
+    }
+
+    private static function payment_amount_covers($paid, $expected){
+        if (!is_numeric($paid) || !is_numeric($expected)) {
+            return false;
+        }
+
+        return round((float) $paid, 2) + 0.001 >= round((float) $expected, 2);
+    }
 
      public static function set_payment_status($config, $entry, $status, $transaction_id, $parent_transaction_id, $amount){
         if(!class_exists("GFPaytmFormData")){
