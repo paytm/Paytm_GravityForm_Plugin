@@ -4,7 +4,7 @@ Tags: ecommerce, payment gateway, wordpress, gravity forms
 Requires at least: 3.5
 PHP version required at least: 7.4
 Tested up to: 7.0.1
-Stable tag: 3.0.0
+Stable tag: 3.1.0
 
 
 Paytm Payment Gateway for accepting payments on your Gravity Forms Store.
